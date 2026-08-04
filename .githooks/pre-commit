@@ -1,0 +1,35 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+LATTICE_SKIP_HOOKS="${LATTICE_SKIP_HOOKS:-0}"
+
+if [ "$LATTICE_SKIP_HOOKS" = "1" ]; then
+  echo "⚠️  WARNING: LATTICE_SKIP_HOOKS=1 — skipping pre-commit checks" >&2
+  exit 0
+fi
+
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+
+echo "══════════════════════════════════════════════════"
+echo "  Pre-commit checks"
+echo "══════════════════════════════════════════════════"
+
+echo ""
+echo "==> [1/4] ruff format check"
+uv run ruff format --check . || exit 1
+
+echo ""
+echo "==> [2/4] ruff lint"
+uv run ruff check . || exit 1
+
+echo ""
+echo "==> [3/4] pyright type check"
+uv run pyright || exit 1
+
+echo ""
+echo "==> [4/4] pytest"
+uv run pytest --tb=short || exit 1
+
+echo ""
+echo "All pre-commit checks passed."

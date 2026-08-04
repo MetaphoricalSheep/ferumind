@@ -1,0 +1,190 @@
+#!/usr/bin/env python3
+"""Initialize a Lattice v2 workspace.
+
+Creates the workspace skeleton per product/spec-mcp.md §2 and installs the
+contract content from product/contract/ (the source of record) into
+workspace/system/. Existing files are never overwritten unless --force.
+Even with --force, workspace identity and the project registry are preserved.
+
+Usage:
+    uv run python scripts/bootstrap_workspace.py
+    uv run python scripts/bootstrap_workspace.py --workspace /custom/path
+    uv run python scripts/bootstrap_workspace.py --force
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from datetime import UTC, datetime
+from pathlib import Path
+
+from lattice.core.errors import FormatUnsupportedError
+from lattice.core.file_io import atomic_write_text
+from lattice.core.format import read_format
+from lattice.core.locks import acquire_workspace_lock
+from lattice.core.paths import WorkspaceRoot, contained_path
+
+FORMAT_VERSION = 2
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+CONTRACT_DIR = REPO_ROOT / "product" / "contract"
+
+# product/contract source → workspace-relative destination
+CONTRACT_INSTALLS: dict[str, str] = {
+    "rules/00-contract.md": "system/rules/00-contract.md",
+    "rules/10-editing.md": "system/rules/10-editing.md",
+    "rules/20-memory.md": "system/rules/20-memory.md",
+    "bootstrap.md": "system/prompts/bootstrap.md",
+    "templates/spine.md": "system/templates/spine.md",
+    "templates/project-rules.md": "system/templates/project-rules.md",
+}
+
+DIRECTORIES: list[str] = [
+    "system",
+    "system/rules",
+    "system/prompts",
+    "system/templates",
+    "system/schemas",
+    "projects",
+]
+
+AGENTS_POINTER = """\
+# Lattice workspace
+
+This is a Lattice v2 workspace. It is live user data, not source code.
+
+- The rules that govern how agents work here live in `system/rules/`
+  (read them in lexical order; project rules in `projects/<key>/rules/`
+  layer on top).
+- The bootstrap prompt for connecting a chat agent is
+  `system/prompts/bootstrap.md`.
+- Connected agents should call the `get_context` MCP tool rather than
+  reading these files directly — it delivers the merged rules, spine, and
+  document map for a project.
+
+Do not edit files under `system/` casually: they are loaded into every chat
+on every project.
+"""
+
+
+def _write(
+    workspace: Path,
+    relative_path: str,
+    content: str,
+    force: bool,
+    written: list[str],
+) -> None:
+    path = contained_path(workspace, relative_path)
+    if path.exists() and not force:
+        return
+    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    atomic_write_text(path, content)
+    path.chmod(0o600)
+    written.append(str(path))
+
+
+def bootstrap(workspace: Path, force: bool) -> list[str]:
+    workspace = workspace.resolve()
+    existing_content = workspace.is_dir() and any(workspace.iterdir())
+    if existing_content:
+        existing_root = WorkspaceRoot(workspace)
+        found_format = read_format(existing_root)
+        if found_format != FORMAT_VERSION:
+            raise FormatUnsupportedError(
+                "Refusing to bootstrap an existing workspace whose format "
+                f"is not {FORMAT_VERSION!r}; run `lattice migrate` explicitly",
+                details={
+                    "found_format": found_format,
+                    "supported_format": FORMAT_VERSION,
+                },
+            )
+
+    workspace.mkdir(mode=0o700, parents=True, exist_ok=True)
+    workspace.chmod(0o700)
+    workspace_root = WorkspaceRoot(workspace)
+    with acquire_workspace_lock(workspace_root):
+        marker = contained_path(workspace_root, "system/meta.yml")
+        if marker.exists():
+            found_format = read_format(workspace_root)
+            if found_format != FORMAT_VERSION:
+                raise FormatUnsupportedError(
+                    "Refusing to bootstrap a workspace whose format "
+                    f"is not {FORMAT_VERSION!r}; run `lattice migrate` explicitly",
+                    details={
+                        "found_format": found_format,
+                        "supported_format": FORMAT_VERSION,
+                    },
+                )
+        elif existing_content or any(
+            entry.name != ".lattice" for entry in workspace_root.iterdir()
+        ):
+            raise FormatUnsupportedError(
+                "Refusing to bootstrap an existing workspace without a format marker; "
+                "run `lattice migrate` explicitly",
+                details={
+                    "found_format": None,
+                    "supported_format": FORMAT_VERSION,
+                },
+            )
+
+        written: list[str] = []
+        for rel in DIRECTORIES:
+            directory = contained_path(workspace_root, rel)
+            directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+            directory.chmod(0o700)
+
+        meta = (
+            "# Lattice workspace metadata. Managed by Lattice; do not edit by hand.\n"
+            f"format: {FORMAT_VERSION}\n"
+            f'created: "{datetime.now(UTC).date().isoformat()}"\n'
+        )
+        # These files carry workspace identity, live project registration, and
+        # local operator guidance. Contract refreshes must never reset them.
+        _write(workspace_root, "system/meta.yml", meta, False, written)
+        _write(workspace_root, "system/projects.yml", "projects: {}\n", False, written)
+        _write(workspace_root, "AGENTS.md", AGENTS_POINTER, False, written)
+
+        for src_rel, dest_rel in CONTRACT_INSTALLS.items():
+            source = CONTRACT_DIR / src_rel
+            if not source.is_file():
+                raise FileNotFoundError(f"Contract source missing: {source}")
+            _write(
+                workspace_root,
+                dest_rel,
+                source.read_text(encoding="utf-8"),
+                force,
+                written,
+            )
+
+        return written
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--workspace",
+        type=Path,
+        default=REPO_ROOT / "workspace",
+        help="Workspace directory to initialize (default: <repo>/workspace)",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Refresh contract rules/templates; preserve workspace identity and registry",
+    )
+    args = parser.parse_args()
+
+    workspace: Path = args.workspace.resolve()
+    written = bootstrap(workspace, args.force)
+    if written:
+        print(f"Initialized {workspace}:")
+        for path in written:
+            print(f"  {path}")
+    else:
+        print(f"{workspace} already up to date (use --force to overwrite).")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

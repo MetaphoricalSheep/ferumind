@@ -1,0 +1,137 @@
+# Security Policy
+
+## Current deployment status
+
+Lattice 0.1 is a single-user, local-first system. The supported server
+transport is local stdio. Direct SSE and streamable HTTP transports fail
+closed in code.
+
+The public-tree check is necessary but not sufficient for publishing: it
+checks current tracked path names and workflow pins, not file contents or Git
+history. Review both the current content and the complete history before
+making an existing repository public. Revoke any exposed credential and
+rewrite the affected history or publish from a reviewed clean export. Do not
+publish a checkout containing a live workspace, and do not expose the
+workspace or MCP server on a public network yet. Server-verified OAuth for
+ChatGPT and Claude, an authorization policy bound to one workspace owner, and
+the associated deployment controls must ship before remote serving is
+considered supported.
+
+The tunnel scripts serve the configured workspace — including a live one —
+over an outbound relay to a single connected client. This is accepted for
+single-user development on a private, non-public deployment. It is not a
+supported production posture: the MCP server does not authenticate callers, so
+the relay and its credentials are the only access control in front of the
+workspace. An outbound relay removes an inbound listening port; it does not
+replace server-verified authentication and authorization.
+
+Treat the tunnel URL and `CONTROL_PLANE_*` credentials as secrets granting
+full read and write access to the workspace. Rotate them if they are exposed
+in logs, screenshots, or connector configuration. The launcher refuses to
+start from CI. Server-verified OAuth for ChatGPT and Claude, plus an
+authorization policy bound to one workspace owner, must ship before remote
+serving is considered supported for anyone other than the workspace owner
+running it themselves.
+
+## Supported versions
+
+This project is pre-1.0. Security fixes are made on the latest `main` branch.
+No older release line currently receives backports.
+
+## CI supply-chain policy
+
+Third-party GitHub Actions must be pinned to a full Git commit SHA, with the
+corresponding release version retained in a comment for readability. Container
+actions referenced with `docker://` must use a full `sha256` image digest.
+Movable action or image tags such as `@v6` and `:latest` are not accepted
+because they can begin executing different code without any change to this
+repository.
+
+Dependabot checks GitHub Actions weekly. An update must remain an explicit,
+reviewable repository change, and the proposed SHA must be verified against
+the action publisher's official release before merging. Workflow permissions
+stay least-privileged, and checkout credentials are not persisted unless a
+specific reviewed job requires them.
+
+The verification pipeline enforces full-SHA action references, exact
+release-version comments, and full Docker image digests. It also rejects
+tracked paths associated with workspace content, environment files,
+credentials, runtime databases, generated agent configurations, and installed
+dependency trees. These filename controls do not replace content and history
+review.
+
+## Reporting a vulnerability
+
+Please use GitHub's private vulnerability reporting feature under the
+repository's **Security** tab. Do not open a public issue for a suspected
+vulnerability and do not include real workspace content, credentials, signed
+download URLs, or other personal data in a report.
+
+Include:
+
+- the affected commit or version;
+- a minimal reproduction using synthetic data;
+- impact and realistic attack preconditions;
+- any suggested mitigation.
+
+## Security boundaries
+
+Lattice protects against accidental or malicious MCP inputs crossing a
+configured workspace/project boundary. Relevant controls include:
+
+- canonical contained paths and refusal of symlinked descendants;
+- strict project keys and folder-derived document roles;
+- hash-guarded proposal/apply edits;
+- snapshot-before-mutation and operation logging;
+- no MCP hard-delete surface;
+- bounded uploads, regex execution, searches, and mutation sizes;
+- HTTPS-only, DNS-pinned remote file fetches with redirect revalidation,
+  public-address enforcement, response-encoding checks, timeouts, and byte
+  limits;
+- private workspace/database/snapshot/secret permissions;
+- metadata-only MCP observations and generic internal errors;
+- disabled direct network transports.
+
+The following are outside the current trust boundary:
+
+- an attacker who can write to the workspace or repository as the operating
+  system account running Lattice;
+- hostile multi-user sharing of one workspace;
+- arbitrary third-party agent/plugin code running as that account;
+- compromise of the host, Python runtime, dependency registry, relay, or LLM
+  provider account.
+
+Project names are assertions, not per-project authorization capabilities.
+OAuth alone will therefore not make a multi-tenant Lattice deployment safe.
+
+## Required gate before internet exposure
+
+Remote support is not complete until all of these are implemented and tested:
+
+1. OAuth authorization-code flow with PKCE, strict redirect URI matching,
+   state/nonce validation, short-lived tokens, rotation/revocation, and
+   server-side issuer/audience/signature validation.
+2. Authorization that binds the authenticated subject to exactly one
+   configured workspace and denies unknown subjects by default.
+3. TLS at the only ingress, no direct application port exposure, and trusted
+   proxy configuration with an explicit host/origin policy.
+4. Request-body, response, rate, concurrency, upload, and wall-clock limits at
+   the ingress. `get_context` is intentionally uncapped by the v2 product
+   contract, so the gateway and workspace sizing policy must account for it.
+5. A dedicated unprivileged service account, a non-group-writable checkout,
+   workspace directories at `0700`, secret files at `0600`, and encrypted,
+   access-controlled backups.
+6. Egress policy permitting only required HTTPS destinations. Cloud metadata,
+   loopback, private, link-local, special-use, and non-443 destinations must
+   remain denied.
+7. Central security logging and alerting that never records document bodies,
+   patch bodies, authorization headers, cookies, tokens, or signed URLs.
+8. Restore drills, whole-workspace storage quotas/retention, dependency and
+   secret scanning, and an incident-response/revocation procedure.
+9. Crash-recovery testing for filesystem-plus-SQLite mutations (including
+   forced process termination), with deterministic reconciliation or a
+   durable intent journal for every partially published state.
+10. Independent review of the final authentication, authorization, proxy, and
+   deployment changes.
+
+Until that gate passes, the correct internet deployment decision is **no-go**.
