@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-LATTICE_SKIP_HOOKS="${LATTICE_SKIP_HOOKS:-0}"
+FERUMIND_SKIP_HOOKS="${FERUMIND_SKIP_HOOKS:-0}"
 
-if [ "$LATTICE_SKIP_HOOKS" = "1" ]; then
-  echo "⚠️  WARNING: LATTICE_SKIP_HOOKS=1 — skipping pre-push checks" >&2
+if [ "$FERUMIND_SKIP_HOOKS" = "1" ]; then
+  echo "⚠️  WARNING: FERUMIND_SKIP_HOOKS=1 — skipping pre-push checks" >&2
   exit 0
 fi
 

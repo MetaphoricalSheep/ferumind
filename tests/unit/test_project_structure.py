@@ -3,15 +3,15 @@ from pathlib import Path
 import pytest
 from bootstrap_workspace import bootstrap
 
-from lattice.core.errors import FormatUnsupportedError
-from lattice.core.paths import WorkspaceRoot
+from ferumind.core.errors import FormatUnsupportedError
+from ferumind.core.paths import WorkspaceRoot
 
 EXPECTED_DIRECTORIES = [
-    "src/lattice/core",
-    "src/lattice/mcp",
-    "src/lattice/cli",
-    "src/lattice/workers",
-    "src/lattice/db/migrations",
+    "src/ferumind/core",
+    "src/ferumind/mcp",
+    "src/ferumind/cli",
+    "src/ferumind/workers",
+    "src/ferumind/db/migrations",
     "tests/unit",
     "tests/integration",
     "tests/fixtures",
@@ -88,9 +88,9 @@ def test_bootstrap_refuses_markerless_existing_workspace_without_changes(
     sentinel = legacy / "legacy-knowledge.md"
     sentinel.write_text("must survive exactly\n", encoding="utf-8")
 
-    with pytest.raises(FormatUnsupportedError, match="lattice migrate"):
+    with pytest.raises(FormatUnsupportedError, match="ferumind migrate"):
         bootstrap(legacy, force=force)
 
     assert sentinel.read_text(encoding="utf-8") == "must survive exactly\n"
     assert not (legacy / "system/meta.yml").exists()
-    assert not (legacy / ".lattice").exists()
+    assert not (legacy / ".ferumind").exists()

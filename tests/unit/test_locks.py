@@ -7,11 +7,11 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core.locks import LockError, acquire_project_lock
+from ferumind.core.locks import LockError, acquire_project_lock
 
 
 def test_second_holder_times_out_while_lock_is_held(tmp_path: Path) -> None:
-    lock_file = tmp_path / ".lattice" / "locks" / "project.lock"
+    lock_file = tmp_path / ".ferumind" / "locks" / "project.lock"
     entered = threading.Event()
     release = threading.Event()
 

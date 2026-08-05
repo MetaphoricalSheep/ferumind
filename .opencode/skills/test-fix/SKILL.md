@@ -1,9 +1,9 @@
 ---
 name: test-fix
-description: Use during plan verification, post-implementation cleanup, CI repair, or completion checks to run Lattice verification, fix safe test/lint/type failures, and escalate unsafe failures.
+description: Use during plan verification, post-implementation cleanup, CI repair, or completion checks to run Ferumind verification, fix safe test/lint/type failures, and escalate unsafe failures.
 compatibility: opencode, claude-code, cursor, copilot, codex
 metadata:
-  project: lattice
+  project: ferumind
   role: verification-repair
   preferred-command: just verify
   canonical-command: scripts/verify.sh
@@ -25,7 +25,7 @@ This is not a feature implementation skill.
 
 ## Mission
 
-Run the Lattice verification suite, diagnose failures, apply the smallest safe fixes, and escalate when the fix requires architecture, product behavior, security, schema, dependency, or implementation judgment.
+Run the Ferumind verification suite, diagnose failures, apply the smallest safe fixes, and escalate when the fix requires architecture, product behavior, security, schema, dependency, or implementation judgment.
 
 ## Preferred verification command
 
@@ -79,13 +79,13 @@ Do not:
 * add Any or type-ignore comments without written justification and escalation
 * commit, push, reset, clean, or destructively remove files
 
-## Lattice constraints
+## Ferumind constraints
 
 Follow AGENTS.md.
 
 Important constraints:
 
-* Core logic belongs in lattice.core.
+* Core logic belongs in ferumind.core.
 * CLI, MCP, workers, and agents must call core logic instead of duplicating it.
 * Use pathlib, not os.path.
 * Public functions need explicit parameter and return types.

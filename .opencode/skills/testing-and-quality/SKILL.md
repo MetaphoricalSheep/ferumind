@@ -3,7 +3,7 @@ name: testing-and-quality
 description: Use when planning tests, repairing coverage, reviewing verification gates, or adding deterministic unit, integration, and adversarial checks.
 compatibility: opencode, claude-code, cursor, copilot, codex
 metadata:
-  project: lattice
+  project: ferumind
   role: quality-engineering
 ---
 

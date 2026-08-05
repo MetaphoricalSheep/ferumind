@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from lattice.core.documents import compute_sha256, parse_document_content
-from lattice.core.errors import FrontmatterInvalidError, UnknownFolderError
-from lattice.core.frontmatter import generate_frontmatter
+from ferumind.core.documents import compute_sha256, parse_document_content
+from ferumind.core.errors import FrontmatterInvalidError, UnknownFolderError
+from ferumind.core.frontmatter import generate_frontmatter
 
 
 def _doc(path: str, *, edit_policy: str | None = None, status: str = "active") -> str:

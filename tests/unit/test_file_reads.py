@@ -6,19 +6,19 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core.errors import (
-    FileNotFoundLatticeError,
+from ferumind.core.errors import (
+    FileNotFoundFerumindError,
     FileTooLargeError,
     ValidationError,
 )
-from lattice.core.file_reads import (
+from ferumind.core.file_reads import (
     MAX_RESOURCE_READ_BYTES,
     read_file_for_context,
     read_file_resource,
     resolve_project_file,
 )
-from lattice.core.paths import PathSafetyError, WorkspaceRoot, contained_project_root
-from lattice.core.writes import MAX_UPLOAD_BYTES
+from ferumind.core.paths import PathSafetyError, WorkspaceRoot, contained_project_root
+from ferumind.core.writes import MAX_UPLOAD_BYTES
 from tests.unit.test_renditions import noisy_image
 
 
@@ -48,7 +48,7 @@ class TestResolution:
         assert resolved.path == "library/deep/nest/photo.jpg"
         assert resolved.mime_type == "image/jpeg"
         assert resolved.context_support == "image"
-        assert resolved.resource_uri.startswith("lattice://file/")
+        assert resolved.resource_uri.startswith("ferumind://file/")
 
     @pytest.mark.parametrize(
         "path",
@@ -79,7 +79,7 @@ class TestResolution:
     def test_missing_file_reports_file_not_found(
         self, workspace: WorkspaceRoot, project: str
     ) -> None:
-        with pytest.raises(FileNotFoundLatticeError):
+        with pytest.raises(FileNotFoundFerumindError):
             resolve_project_file(workspace, project, "library/nope.jpg")
 
     def test_directory_is_refused(
@@ -89,12 +89,12 @@ class TestResolution:
         with pytest.raises(ValidationError):
             resolve_project_file(workspace, project, "library/adir")
 
-    def test_lattice_internal_path_is_not_readable(
+    def test_ferumind_internal_path_is_not_readable(
         self, workspace: WorkspaceRoot, project: str, project_root: Path
     ) -> None:
-        write(project_root, ".lattice/secret.bin", b"internal")
-        with pytest.raises(FileNotFoundLatticeError):
-            resolve_project_file(workspace, project, ".lattice/secret.bin")
+        write(project_root, ".ferumind/secret.bin", b"internal")
+        with pytest.raises(FileNotFoundFerumindError):
+            resolve_project_file(workspace, project, ".ferumind/secret.bin")
 
     def test_oversized_file_is_refused_with_sizes(
         self,
@@ -103,7 +103,7 @@ class TestResolution:
         project_root: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        from lattice.core import file_reads
+        from ferumind.core import file_reads
 
         monkeypatch.setattr(file_reads, "MAX_RESOURCE_READ_BYTES", 16)
         write(project_root, "library/big.bin", b"x" * 64)
@@ -200,7 +200,7 @@ class TestImageContext:
         assert result.rendition.size_bytes < len(before)
         assert source.read_bytes() == before
 
-    def test_malformed_image_fails_as_a_lattice_error(
+    def test_malformed_image_fails_as_a_ferumind_error(
         self, workspace: WorkspaceRoot, project: str, project_root: Path
     ) -> None:
         write(project_root, "library/broken.jpg", b"definitely not a jpeg")

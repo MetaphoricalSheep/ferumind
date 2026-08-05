@@ -12,9 +12,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from lattice.core import uploads as upload_staging
-from lattice.core import writes
-from lattice.core.errors import (
+from ferumind.core import uploads as upload_staging
+from ferumind.core import writes
+from ferumind.core.errors import (
     ContentHashMismatchError,
     DocumentExistsError,
     FileTooLargeError,
@@ -28,12 +28,12 @@ from lattice.core.errors import (
     ValidationError,
     WorkspaceMismatchError,
 )
-from lattice.core.images import ImagePolicy
-from lattice.core.operations import get_operation, list_operations
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.reads import read_project_snapshot
-from lattice.core.snapshots import list_snapshots_from_db
-from lattice.core.writes import (
+from ferumind.core.images import ImagePolicy
+from ferumind.core.operations import get_operation, list_operations
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.reads import read_project_snapshot
+from ferumind.core.snapshots import list_snapshots_from_db
+from ferumind.core.writes import (
     append_upload_chunk,
     discard_upload,
     finalize_library_file_upload,
@@ -263,7 +263,7 @@ class TestUploadLibraryFile:
         monkeypatch: pytest.MonkeyPatch,
         failure_point: str,
     ) -> None:
-        snapshots_root = workspace / "projects" / project / ".lattice" / "snapshots"
+        snapshots_root = workspace / "projects" / project / ".ferumind" / "snapshots"
         before_dirs: set[Path] = (
             {Path(entry) for entry in snapshots_root.iterdir()}
             if snapshots_root.is_dir()
@@ -534,7 +534,7 @@ class TestChunkedUpload:
         assert op.operation_type == "finalize_library_file_upload"
 
         # Staging area is cleaned up after finalize.
-        staging = workspace / "projects" / project / ".lattice" / "uploads" / session.upload_id
+        staging = workspace / "projects" / project / ".ferumind" / "uploads" / session.upload_id
         assert not staging.exists()
 
     def test_chunk_resend_is_idempotent(
@@ -882,7 +882,7 @@ class TestChunkedUpload:
     def test_upload_scoped_to_its_project(
         self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
     ) -> None:
-        from lattice.core.writes import create_project
+        from ferumind.core.writes import create_project
 
         create_project(conn, workspace, key="other", title="Other")
         session = start_library_file_upload(
@@ -912,7 +912,7 @@ class TestChunkedUpload:
             chunk_index=0,
             chunk_base64=base64.b64encode(b"x").decode("ascii"),
         )
-        staging = workspace / "projects" / project / ".lattice" / "uploads" / session.upload_id
+        staging = workspace / "projects" / project / ".ferumind" / "uploads" / session.upload_id
         assert staging.is_dir()
         conn.execute(
             "UPDATE operations SET expires_at = '2000-01-01T00:00:00+00:00' WHERE id = ?",
@@ -944,7 +944,7 @@ class TestChunkedUpload:
             chunk_index=0,
             chunk_base64=base64.b64encode(b"x").decode("ascii"),
         )
-        staging = workspace / "projects" / project / ".lattice" / "uploads" / expired.upload_id
+        staging = workspace / "projects" / project / ".ferumind" / "uploads" / expired.upload_id
         conn.execute(
             "UPDATE operations SET expires_at = '2000-01-01T00:00:00+00:00' WHERE id = ?",
             (expired.upload_id,),
@@ -974,7 +974,7 @@ class TestChunkedUpload:
         result = discard_upload(conn, workspace, project, upload_id=session.upload_id)
         assert result.state == "discarded"
 
-        staging = workspace / "projects" / project / ".lattice" / "uploads" / session.upload_id
+        staging = workspace / "projects" / project / ".ferumind" / "uploads" / session.upload_id
         assert not staging.exists()
 
         with pytest.raises(InvalidOperationError):

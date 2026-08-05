@@ -9,14 +9,14 @@ from collections.abc import Callable
 import httpx
 import pytest
 
-from lattice.core.errors import (
+from ferumind.core.errors import (
     DownloadFailedError,
     DownloadTimeoutError,
     FileTooLargeError,
     TooManyRedirectsError,
     UnsafeUrlError,
 )
-from lattice.core.remote_fetch import (
+from ferumind.core.remote_fetch import (
     Resolver,
     _default_resolve,  # pyright: ignore[reportPrivateUsage]
     _is_unsafe_ip,  # pyright: ignore[reportPrivateUsage]

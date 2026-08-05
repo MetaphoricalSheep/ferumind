@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import pytest
 
-from lattice.core.document_map import build_document_map
-from lattice.core.edit_targets import ExactEdit, InsertAnchor
-from lattice.core.errors import (
+from ferumind.core.document_map import build_document_map
+from ferumind.core.edit_targets import ExactEdit, InsertAnchor
+from ferumind.core.errors import (
     AmbiguousMatchError,
     FrontmatterProtectedError,
     FrontmatterRequiredError,
@@ -14,8 +14,8 @@ from lattice.core.errors import (
     PatchConflictError,
     ValidationError,
 )
-from lattice.core.frontmatter import generate_frontmatter
-from lattice.core.patches import (
+from ferumind.core.frontmatter import generate_frontmatter
+from ferumind.core.patches import (
     prepare_exact_replace_patch,
     prepare_frontmatter_patch,
     prepare_insert_patch,

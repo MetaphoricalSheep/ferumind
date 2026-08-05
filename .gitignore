@@ -75,7 +75,7 @@ instance/
 *.sqlite-shm
 *.sqlite-wal
 
-# ── Lattice live workspace ──────────────────────────────────────────────────
+# ── Ferumind live workspace ──────────────────────────────────────────────────
 /workspace/*
 !/workspace/.gitkeep
 

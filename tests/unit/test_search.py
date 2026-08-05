@@ -6,10 +6,10 @@ import sqlite3
 
 import pytest
 
-from lattice.core.errors import ValidationError
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.search import build_match_expression, search_project
-from lattice.core.writes import archive_document, create_document
+from ferumind.core.errors import ValidationError
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.search import build_match_expression, search_project
+from ferumind.core.writes import archive_document, create_document
 
 
 def test_build_match_expression_quotes_terms() -> None:

@@ -3,7 +3,7 @@ requires = ["hatchling==1.31.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "lattice"
+name = "ferumind"
 version = "0.1.0"
 description = "Local-first, Markdown-backed knowledge workspace for AI agents"
 requires-python = ">=3.12"
@@ -45,12 +45,12 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/MetaphoricalSheep/lattice"
-Repository = "https://github.com/MetaphoricalSheep/lattice"
-Issues = "https://github.com/MetaphoricalSheep/lattice/issues"
+Homepage = "https://github.com/MetaphoricalSheep/ferumind"
+Repository = "https://github.com/MetaphoricalSheep/ferumind"
+Issues = "https://github.com/MetaphoricalSheep/ferumind/issues"
 
 [project.scripts]
-lattice = "lattice.cli.main:app"
+ferumind = "ferumind.cli.main:app"
 
 [tool.hatch.build]
 exclude = [
@@ -139,7 +139,7 @@ addopts = [
 ]
 
 [tool.coverage.run]
-source = ["src/lattice"]
+source = ["src/ferumind"]
 omit = [
   "*/migrations/*",
   "*/tests/*",
@@ -151,4 +151,4 @@ skip_covered = true
 fail_under = 80
 
 [tool.coverage.html]
-title = "Lattice Coverage Report"
+title = "Ferumind Coverage Report"

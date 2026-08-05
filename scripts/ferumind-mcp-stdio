@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+load_env_file() {
+  local env_file="$1"
+  if [[ -f "$env_file" ]]; then
+    if [[ -L "$env_file" ]]; then
+      exit 1
+    fi
+    local mode owner current_uid
+    mode="$(stat -c '%a' "$env_file")"
+    owner="$(stat -c '%u' "$env_file")"
+    current_uid="$(id -u)"
+    if (( (8#$mode & 077) != 0 )); then
+      exit 1
+    fi
+    if [[ "$owner" != "$current_uid" && "$owner" != "0" ]]; then
+      exit 1
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    source "$env_file" >&2
+    set +a
+  fi
+}
+
+load_env_file "${REPO_ROOT}/.env"
+load_env_file "/etc/ferumind-tunnel.env"
+load_env_file "/etc/ferumind-mcp.env"
+
+# The relay needs these credentials; the MCP child does not. Do not leave
+# control-plane authority in the environment of the document-serving process.
+unset CONTROL_PLANE_API_KEY CONTROL_PLANE_TUNNEL_ID
+unset PYTHONINSPECT PYTHONSTARTUP PYTHONPATH
+export PYTHONSAFEPATH=1
+
+cd "$REPO_ROOT"
+exec uv run ferumind mcp serve "$@"

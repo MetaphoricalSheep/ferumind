@@ -29,7 +29,7 @@ exist in v2 code. Superseded implementation details are not retained.
   `bootstrap_workspace.py` installs [contract/](contract/) and writes
   `system/meta.yml` with `format: 2`).
 - Format gate in core: `FORMAT_UNSUPPORTED` on writes when the marker
-  mismatches; `lattice migrate` CLI frame with empty migrator registry
+  mismatches; `ferumind migrate` CLI frame with empty migrator registry
   (spec-versioning §1).
 - Frontmatter v2 (`status`, `edit_policy` + folder defaults); indexer
   columns; search filters.

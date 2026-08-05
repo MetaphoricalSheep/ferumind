@@ -7,7 +7,7 @@
 1. Read relevant source files in the affected area.
 2. Read existing tests to understand testing patterns.
 3. Identify:
-   - Which modules in `src/lattice/core/` are affected
+   - Which modules in `src/ferumind/core/` are affected
    - Which other layers (MCP, CLI, workers, agents) are affected
    - Which tests need to be added or updated
    - Any security or path-safety implications

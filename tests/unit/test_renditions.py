@@ -8,8 +8,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from lattice.core.errors import FileTooLargeError, ValidationError
-from lattice.core.renditions import (
+from ferumind.core.errors import FileTooLargeError, ValidationError
+from ferumind.core.renditions import (
     DEFAULT_IMAGE_EDGE,
     MAX_IMAGE_EDGE,
     MAX_IMAGE_QUALITY,
@@ -170,7 +170,7 @@ class TestBounds:
     def test_decompression_bomb_is_refused_before_decoding(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from lattice.core import renditions
+        from ferumind.core import renditions
 
         monkeypatch.setattr(renditions, "MAX_DECODED_PIXELS", 100)
         source = tmp_path / "big.png"
@@ -210,7 +210,7 @@ class TestBounds:
 
 
 class TestFailureModes:
-    def test_non_image_bytes_fail_as_a_lattice_error(self, tmp_path: Path) -> None:
+    def test_non_image_bytes_fail_as_a_ferumind_error(self, tmp_path: Path) -> None:
         source = tmp_path / "not-an-image.jpg"
         source.write_bytes(b"this is plainly not a JPEG")
 

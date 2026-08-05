@@ -8,17 +8,17 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core.errors import ValidationError
-from lattice.core.file_uri import parse_file_uri
-from lattice.core.files import (
+from ferumind.core.errors import ValidationError
+from ferumind.core.file_uri import parse_file_uri
+from ferumind.core.files import (
     classify_context_support,
     is_recognized_upload_sidecar,
     list_project_files,
     resolve_mime_type,
     sidecar_for_path,
 )
-from lattice.core.paths import PathSafetyError, WorkspaceRoot, contained_project_root
-from lattice.core.writes import upload_library_file
+from ferumind.core.paths import PathSafetyError, WorkspaceRoot, contained_project_root
+from ferumind.core.writes import upload_library_file
 
 
 @pytest.fixture
@@ -124,8 +124,8 @@ class TestDiscovery:
         write(project_root, "library/photo.jpg")
         assert paths(project_root, project) == ["library/photo.jpg"]
 
-    def test_lattice_internals_are_excluded(self, project_root: Path, project: str) -> None:
-        write(project_root, ".lattice/snapshots/secret.bin")
+    def test_ferumind_internals_are_excluded(self, project_root: Path, project: str) -> None:
+        write(project_root, ".ferumind/snapshots/secret.bin")
         write(project_root, "library/photo.jpg")
         assert paths(project_root, project) == ["library/photo.jpg"]
 

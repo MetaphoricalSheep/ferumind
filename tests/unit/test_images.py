@@ -1,4 +1,4 @@
-"""Storage image normalization (``lattice.core.images``)."""
+"""Storage image normalization (``ferumind.core.images``)."""
 
 from __future__ import annotations
 
@@ -8,8 +8,8 @@ import io
 import pytest
 from PIL import Image
 
-from lattice.core.errors import FileTooLargeError, ValidationError
-from lattice.core.images import (
+from ferumind.core.errors import FileTooLargeError, ValidationError
+from ferumind.core.images import (
     MIN_LOSSY_REENCODE_GAIN,
     SKIP_ANIMATED,
     SKIP_DISABLED,
@@ -209,7 +209,7 @@ class TestDecompressionBomb:
     def test_oversized_geometry_is_refused_before_decode(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from lattice.core import images
+        from ferumind.core import images
 
         monkeypatch.setattr(images, "MAX_DECODED_PIXELS", 1000)
         with pytest.raises(FileTooLargeError):

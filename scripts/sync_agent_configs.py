@@ -68,11 +68,11 @@ def sync_cursor(
     rules_dir = REPO_ROOT / ".cursor" / "rules"
 
     files: dict[str, str] = {
-        "000-project.mdc": f"{GENERATED_HEADER}\n# Lattice Project\n\n{agents_content[:500]}",
+        "000-project.mdc": f"{GENERATED_HEADER}\n# Ferumind Project\n\n{agents_content[:500]}",
         "100-python.mdc": f"{GENERATED_HEADER}\n# Python Standards\n\n- Use Python 3.12+\n- Strict typing required\n- Use Pydantic v2 for configs\n- Use pathlib, not os.path\n- Line length 100\n- Ruff for linting/formatting",
         "200-testing.mdc": f"{GENERATED_HEADER}\n# Testing Standards\n\n- pytest for all tests\n- Coverage threshold 80%+\n- Use tmp_path for filesystem tests\n- Test success and failure paths\n- No mocking core behavior unnecessarily",
         "300-security.mdc": f"{GENERATED_HEADER}\n# Security Rules\n\n- No symlink escape\n- No `..` traversal\n- No absolute writes\n- All paths through core path validator\n- No hard delete of user content",
-        "400-lattice-architecture.mdc": f"{GENERATED_HEADER}\n# Lattice Architecture\n\n{agents_content[:800]}",
+        "400-ferumind-architecture.mdc": f"{GENERATED_HEADER}\n# Ferumind Architecture\n\n{agents_content[:800]}",
     }
 
     for name, content in files.items():
@@ -102,7 +102,7 @@ def sync_cursor(
             "description: Use when running verification or fixing failing tests, lint, or type checks.\n"
             "alwaysApply: false\n"
             "---\n\n"
-            "# Lattice Test Fixer\n\n"
+            "# Ferumind Test Fixer\n\n"
             f"{test_fixer}"
         )
         if write_generated(path, content, force):
@@ -149,7 +149,7 @@ def sync_copilot(
     instructions_path = REPO_ROOT / ".github" / "copilot-instructions.md"
     if write_generated(
         instructions_path,
-        f"{GENERATED_HEADER}# Lattice — Copilot Instructions\n\n{agents_content[:1500]}",
+        f"{GENERATED_HEADER}# Ferumind — Copilot Instructions\n\n{agents_content[:1500]}",
         force,
     ):
         created.append(".github/copilot-instructions.md")
@@ -203,7 +203,7 @@ def sync_codex(
     skills_section = "\n\n".join(skills.values())
     content = (
         f"{GENERATED_HEADER}"
-        "# Codex — Lattice\n\n"
+        "# Codex — Ferumind\n\n"
         "Use root `AGENTS.md` for project context.\n\n"
         "## Skills\n\n"
         f"{skills_section}\n\n"

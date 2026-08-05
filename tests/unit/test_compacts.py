@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 import yaml
 
-from lattice.core import compacts
-from lattice.core.compacts import CompactFrontmatter
-from lattice.core.documents import compute_sha256
-from lattice.core.errors import CompactIntegrityError, FrontmatterInvalidError, ValidationError
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.registry import load_registry, validate_project_key
-from lattice.core.writes import create_project
+from ferumind.core import compacts
+from ferumind.core.compacts import CompactFrontmatter
+from ferumind.core.documents import compute_sha256
+from ferumind.core.errors import CompactIntegrityError, FrontmatterInvalidError, ValidationError
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.registry import load_registry, validate_project_key
+from ferumind.core.writes import create_project
 
 
 def _handoff_body(prompt: str) -> str:

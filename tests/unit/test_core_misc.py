@@ -8,13 +8,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from lattice.core.config import load_config
-from lattice.core.documents import parse_document_content
-from lattice.core.errors import ERROR_CODES, LatticeError, PatchConflictError
-from lattice.core.file_io import atomic_write_text
-from lattice.core.frontmatter import generate_frontmatter
-from lattice.core.policy import FROZEN_NOTE, POLICY_NOTES, policy_echo_for
-from lattice.mcp.models import (
+from ferumind.core.config import load_config
+from ferumind.core.documents import parse_document_content
+from ferumind.core.errors import ERROR_CODES, FerumindError, PatchConflictError
+from ferumind.core.file_io import atomic_write_text
+from ferumind.core.frontmatter import generate_frontmatter
+from ferumind.core.policy import FROZEN_NOTE, POLICY_NOTES, policy_echo_for
+from ferumind.mcp.models import (
     apply_state_fields,
     make_error,
     make_success,
@@ -28,25 +28,25 @@ from lattice.mcp.models import (
 class TestConfig:
     def test_defaults(self, monkeypatch: pytest.MonkeyPatch) -> None:
         for key in (
-            "LATTICE_WORKSPACE",
-            "LATTICE_LOG_LEVEL",
+            "FERUMIND_WORKSPACE",
+            "FERUMIND_LOG_LEVEL",
         ):
             monkeypatch.delenv(key, raising=False)
         config = load_config()
         assert config.workspace_path == Path("./workspace")
 
     def test_env_overrides(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LATTICE_WORKSPACE", "/data/ws")
+        monkeypatch.setenv("FERUMIND_WORKSPACE", "/data/ws")
         config = load_config()
         assert config.workspace_path == Path("/data/ws")
 
     def test_explicit_workspace_wins(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LATTICE_WORKSPACE", "/data/ws")
+        monkeypatch.setenv("FERUMIND_WORKSPACE", "/data/ws")
         config = load_config(Path("/explicit"))
         assert config.workspace_path == Path("/explicit")
 
     def test_invalid_log_level_fails_closed(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        monkeypatch.setenv("LATTICE_LOG_LEVEL", "VERBOSE")
+        monkeypatch.setenv("FERUMIND_LOG_LEVEL", "VERBOSE")
         with pytest.raises(PydanticValidationError):
             load_config()
 
@@ -129,5 +129,5 @@ class TestErrors:
         exc = PatchConflictError("boom", details={"a": 1})
         assert exc.code == "PATCH_CONFLICT"
         assert exc.details == {"a": 1}
-        assert isinstance(exc, LatticeError)
+        assert isinstance(exc, FerumindError)
         assert isinstance(exc, ValueError)

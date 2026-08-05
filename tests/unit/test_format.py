@@ -6,15 +6,15 @@ import os
 
 import pytest
 
-from lattice.core.errors import FormatUnsupportedError
-from lattice.core.format import (
+from ferumind.core.errors import FormatUnsupportedError
+from ferumind.core.format import (
     SUPPORTED_FORMAT,
     FormatGate,
     meta_path,
     read_format,
     write_format_marker,
 )
-from lattice.core.paths import WorkspaceRoot
+from ferumind.core.paths import WorkspaceRoot
 
 
 def test_bootstrap_workspace_carries_format_2(workspace: WorkspaceRoot) -> None:
@@ -47,7 +47,7 @@ def test_gate_older_format_allows_reads_refuses_writes(workspace: WorkspaceRoot)
     write_format_marker(workspace, 1)
     gate = FormatGate(workspace)
     gate.check_read()
-    with pytest.raises(FormatUnsupportedError, match="lattice migrate"):
+    with pytest.raises(FormatUnsupportedError, match="ferumind migrate"):
         gate.check_write()
 
 

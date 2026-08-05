@@ -2,7 +2,7 @@
 
 ## Current deployment status
 
-Lattice 0.1 is a single-user, local-first system. The supported server
+Ferumind 0.1 is a single-user, local-first system. The supported server
 transport is local stdio. Direct SSE and streamable HTTP transports fail
 closed in code.
 
@@ -76,7 +76,7 @@ Include:
 
 ## Security boundaries
 
-Lattice protects against accidental or malicious MCP inputs crossing a
+Ferumind protects against accidental or malicious MCP inputs crossing a
 configured workspace/project boundary. Relevant controls include:
 
 - canonical contained paths and refusal of symlinked descendants;
@@ -95,14 +95,14 @@ configured workspace/project boundary. Relevant controls include:
 The following are outside the current trust boundary:
 
 - an attacker who can write to the workspace or repository as the operating
-  system account running Lattice;
+  system account running Ferumind;
 - hostile multi-user sharing of one workspace;
 - arbitrary third-party agent/plugin code running as that account;
 - compromise of the host, Python runtime, dependency registry, relay, or LLM
   provider account.
 
 Project names are assertions, not per-project authorization capabilities.
-OAuth alone will therefore not make a multi-tenant Lattice deployment safe.
+OAuth alone will therefore not make a multi-tenant Ferumind deployment safe.
 
 ## Required gate before internet exposure
 

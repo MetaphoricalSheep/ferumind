@@ -9,9 +9,9 @@
 3. Add or update tests for every new behavior.
 4. Run targeted checks on changed modules:
    ```bash
-   uv run ruff format --check src/lattice/core/paths.py
-   uv run ruff check src/lattice/core/paths.py
-   uv run pyright src/lattice/core/paths.py
+   uv run ruff format --check src/ferumind/core/paths.py
+   uv run ruff check src/ferumind/core/paths.py
+   uv run pyright src/ferumind/core/paths.py
    uv run pytest tests/unit/test_paths.py -x
    ```
 5. For broad changes, run full verification:

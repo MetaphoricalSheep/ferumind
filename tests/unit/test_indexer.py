@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import sqlite3
 
-from lattice.core.frontmatter import generate_frontmatter
-from lattice.core.indexer import (
+from ferumind.core.frontmatter import generate_frontmatter
+from ferumind.core.indexer import (
     get_indexed_signature,
     index_file,
     index_project,
     rebuild_index,
     remove_from_index,
 )
-from lattice.core.paths import WorkspaceRoot
+from ferumind.core.paths import WorkspaceRoot
 
 
 def _write_doc(workspace: WorkspaceRoot, project: str, rel: str, title: str) -> None:
@@ -87,14 +87,14 @@ def test_remove_from_index(
     assert get_indexed_signature(conn, project, "canvases/a.md") is None
 
 
-def test_index_skips_hidden_and_lattice_internals(
+def test_index_skips_hidden_and_ferumind_internals(
     conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
 ) -> None:
-    hidden = workspace / "projects" / project / ".lattice" / "snapshots" / "x.md"
+    hidden = workspace / "projects" / project / ".ferumind" / "snapshots" / "x.md"
     hidden.parent.mkdir(parents=True, exist_ok=True)
     hidden.write_text("# internal\n", encoding="utf-8")
     index_project(conn, workspace, project)
-    assert get_indexed_signature(conn, project, ".lattice/snapshots/x.md") is None
+    assert get_indexed_signature(conn, project, ".ferumind/snapshots/x.md") is None
 
 
 def test_index_records_errors_for_unparseable_documents(

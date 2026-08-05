@@ -7,9 +7,9 @@ from pathlib import Path
 
 from typer.testing import CliRunner
 
-from lattice.cli.main import app
-from lattice.core import compacts
-from lattice.core.paths import WorkspaceRoot
+from ferumind.cli.main import app
+from ferumind.core import compacts
+from ferumind.core.paths import WorkspaceRoot
 
 runner = CliRunner()
 

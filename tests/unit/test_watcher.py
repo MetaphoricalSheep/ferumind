@@ -7,13 +7,13 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core.errors import ProjectNotFoundError
-from lattice.core.operations import list_operations
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.snapshots import list_snapshots_from_db
-from lattice.db.database import Database
-from lattice.workers import watcher as watcher_module
-from lattice.workers.watcher import (
+from ferumind.core.errors import ProjectNotFoundError
+from ferumind.core.operations import list_operations
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.snapshots import list_snapshots_from_db
+from ferumind.db.database import Database
+from ferumind.workers import watcher as watcher_module
+from ferumind.workers.watcher import (
     FileDebouncer,
     classify_event_path,
     handle_detected_change,
@@ -78,7 +78,7 @@ class TestClassifyEventPath:
     def test_ignores_non_markdown_hidden_and_internals(self, workspace: WorkspaceRoot) -> None:
         base = Path(workspace) / "projects" / "demo"
         assert classify_event_path(workspace, base / "canvases" / "img.png") is None
-        assert classify_event_path(workspace, base / ".lattice" / "snapshots" / "x.md") is None
+        assert classify_event_path(workspace, base / ".ferumind" / "snapshots" / "x.md") is None
         assert classify_event_path(workspace, Path(workspace) / "system" / "meta.yml") is None
         assert classify_event_path(workspace, Path("/etc/passwd")) is None
         assert classify_event_path(workspace, base / "spine.md") == ("demo", "spine.md")
@@ -87,7 +87,7 @@ class TestClassifyEventPath:
 def test_handle_detected_change_snapshots_and_logs(
     database: Database, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
 ) -> None:
-    from lattice.core.indexer import index_project
+    from ferumind.core.indexer import index_project
 
     index_project(conn, workspace, project)
     spine = Path(workspace) / "projects" / project / "spine.md"
@@ -103,7 +103,7 @@ def test_handle_detected_change_snapshots_and_logs(
 def test_handle_detected_change_without_snapshot(
     database: Database, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
 ) -> None:
-    from lattice.core.indexer import index_project
+    from ferumind.core.indexer import index_project
 
     index_project(conn, workspace, project)
     spine = Path(workspace) / "projects" / project / "spine.md"
@@ -122,7 +122,7 @@ def test_snapshot_request_does_not_snapshot_a_content_identical_touch(
     workspace: WorkspaceRoot,
     project: str,
 ) -> None:
-    from lattice.core.indexer import index_project
+    from ferumind.core.indexer import index_project
 
     index_project(conn, workspace, project)
     spine = Path(workspace) / "projects" / project / "spine.md"

@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core.paths import (
+from ferumind.core.paths import (
     PathSafetyError,
     WorkspaceRoot,
     assert_no_symlink_escape,
@@ -34,7 +34,7 @@ def test_resolve_repo_root_raises_if_not_found(tmp_path: Path) -> None:
 
 
 def test_resolve_workspace_root_default() -> None:
-    from lattice.core.paths import RepoRoot
+    from ferumind.core.paths import RepoRoot
 
     repo = RepoRoot(Path("/repo"))
     ws = resolve_workspace_root(repo)
@@ -42,7 +42,7 @@ def test_resolve_workspace_root_default() -> None:
 
 
 def test_resolve_workspace_root_custom() -> None:
-    from lattice.core.paths import RepoRoot
+    from ferumind.core.paths import RepoRoot
 
     repo = RepoRoot(Path("/repo"))
     ws = resolve_workspace_root(repo, "data")
@@ -188,7 +188,7 @@ def test_is_under_root_rejects_absolute(tmp_path: Path) -> None:
 
 
 def test_resolve_workspace_root_rejects_sibling_prefix(tmp_path: Path) -> None:
-    from lattice.core.paths import RepoRoot
+    from ferumind.core.paths import RepoRoot
 
     repo_dir = tmp_path / "repo"
     repo_dir.mkdir()

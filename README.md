@@ -1,14 +1,14 @@
-# Lattice
+# Ferumind
 
-> Chats are disposable; Lattice is where the continuity lives.
+> Chats are disposable; Ferumind is where the continuity lives.
 
-Lattice is a local-first, Markdown-backed workspace shared by a person and
+Ferumind is a local-first, Markdown-backed workspace shared by a person and
 their AI agents. Documents remain inspectable on disk while a stateless MCP
 server provides project scoping, retrieval, guarded edits, snapshots, and an
 auditable operation history.
 
-This repository is Lattice v2, currently **alpha**. The product contract is in
-[`product/`](product/00-what-is-lattice.md); when code and
+This repository is Ferumind v2, currently **alpha**. The product contract is in
+[`product/`](product/00-what-is-ferumind.md); when code and
 [`product/spec-mcp.md`](product/spec-mcp.md) disagree, the specification wins.
 
 ## Security status
@@ -16,7 +16,7 @@ This repository is Lattice v2, currently **alpha**. The product contract is in
 The supported deployment today is single-user and local, over MCP stdio.
 Direct SSE and streamable HTTP transports are disabled in code.
 
-**Do not expose Lattice to the public internet yet.** Server-verified OAuth
+**Do not expose Ferumind to the public internet yet.** Server-verified OAuth
 and subject-to-workspace authorization for ChatGPT and Claude are the next
 remote-serving gate. See [SECURITY.md](SECURITY.md) for the threat model,
 reporting process, and the complete internet deployment checklist.
@@ -60,7 +60,7 @@ System state       Markdown workspace · SQLite index/history
 Workers            index/watch · backup · maintenance (mechanical only)
 ```
 
-Core safety logic lives in `src/lattice/core`. Interface and worker layers
+Core safety logic lives in `src/ferumind/core`. Interface and worker layers
 call core rather than duplicating it.
 
 ## Quick start
@@ -69,8 +69,8 @@ Requirements: Linux, Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and
 [`just`](https://github.com/casey/just) for the convenience commands.
 
 ```bash
-git clone https://github.com/MetaphoricalSheep/lattice.git
-cd lattice
+git clone https://github.com/MetaphoricalSheep/ferumind.git
+cd ferumind
 just setup
 just install-hooks
 just bootstrap
@@ -112,9 +112,9 @@ workspace/
     library/
     inbox/
     archive/
-    .lattice/              private snapshots and upload staging
+    .ferumind/              private snapshots and upload staging
   compacts/
-  .lattice/                private database and global snapshots/backups
+  .ferumind/                private database and global snapshots/backups
 ```
 
 Run the service as the same dedicated OS account that owns the workspace.

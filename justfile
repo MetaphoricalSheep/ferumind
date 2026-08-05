@@ -33,7 +33,7 @@ test:
 
 # Run tests with coverage reporting.
 test-cov:
-    uv run pytest --cov=src/lattice --cov-report=term-missing
+    uv run pytest --cov=src/ferumind --cov-report=term-missing
 
 # Run the full verification pipeline.
 verify:
@@ -51,21 +51,21 @@ sync-agents:
 sync-agent-target target:
     uv run python scripts/sync_agent_configs.py --force --target {{target}}
 
-# Run the Lattice CLI with optional arguments.
+# Run the Ferumind CLI with optional arguments.
 cli *args='':
-    uv run lattice {{args}}
+    uv run ferumind {{args}}
 
 # Reseal a hand-edited workspace compact after deliberate edits.
 compact-reseal token:
-    uv run lattice compact reseal {{token}}
+    uv run ferumind compact reseal {{token}}
 
 # List every project (registry, folder, database), deduplicated but tagged by source.
 project-list *args='':
-    uv run lattice project list {{args}}
+    uv run ferumind project list {{args}}
 
 # Clean stale registry/database state after a project folder has already been removed.
 project-delete key *args='':
-    uv run lattice project delete {{key}} {{args}}
+    uv run ferumind project delete {{key}} {{args}}
 
 # Start the tunnel helper with optional arguments.
 tunnel *args='':

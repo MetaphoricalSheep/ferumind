@@ -1,4 +1,4 @@
-"""Canonical ``lattice://file`` URI encoding and parsing."""
+"""Canonical ``ferumind://file`` URI encoding and parsing."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import base64
 
 import pytest
 
-from lattice.core.errors import ValidationError
-from lattice.core.file_uri import (
+from ferumind.core.errors import ValidationError
+from ferumind.core.file_uri import (
     FILE_URI_PREFIX,
     MAX_ENCODED_PATH_CHARS,
     build_file_uri,
@@ -58,14 +58,14 @@ class TestRejection:
         [
             "file:///etc/passwd",
             "https://example.com/x",
-            "lattice://other/demo/aGk",
-            "lattice://file/demo",
-            "lattice://file/demo/aGk/extra",
-            "lattice://file/demo/",
-            "lattice://file/Demo/aGk",
-            "lattice://file/1bad/aGk",
-            "lattice://file/demo/not base64",
-            "lattice://file/demo/@@@",
+            "ferumind://other/demo/aGk",
+            "ferumind://file/demo",
+            "ferumind://file/demo/aGk/extra",
+            "ferumind://file/demo/",
+            "ferumind://file/Demo/aGk",
+            "ferumind://file/1bad/aGk",
+            "ferumind://file/demo/not base64",
+            "ferumind://file/demo/@@@",
         ],
     )
     def test_malformed_uris_are_rejected(self, uri: str) -> None:

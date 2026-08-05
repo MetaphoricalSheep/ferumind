@@ -4,22 +4,22 @@ from __future__ import annotations
 
 import pytest
 
-from lattice.core import document_map as document_map_core
-from lattice.core.document_map import (
+from ferumind.core import document_map as document_map_core
+from ferumind.core.document_map import (
     build_document_map,
     frontmatter_line_range,
     read_document_range,
     split_document_lines,
 )
-from lattice.core.documents import compute_sha256
-from lattice.core.edit_targets import find_in_document
-from lattice.core.errors import (
+from ferumind.core.documents import compute_sha256
+from ferumind.core.edit_targets import find_in_document
+from ferumind.core.errors import (
     InvalidRegexError,
     RangeNotFoundError,
     RangeTooLargeError,
     ValidationError,
 )
-from lattice.core.frontmatter import generate_frontmatter
+from ferumind.core.frontmatter import generate_frontmatter
 
 FM = generate_frontmatter(doc_id="doc_x", project_key="demo", title="Doc")
 BODY = (

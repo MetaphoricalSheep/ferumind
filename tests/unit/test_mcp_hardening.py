@@ -15,13 +15,13 @@ import anyio
 import pytest
 from mcp.types import CallToolResult
 
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.writes import ChatGPTSingleUploadResult
-from lattice.mcp import observation, tool_context, write_tools
-from lattice.mcp import server as mcp_server
-from lattice.mcp.models import make_success
-from lattice.mcp.observation import observe_tool
-from lattice.mcp.server import mcp, register_all_tools, serve
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.writes import ChatGPTSingleUploadResult
+from ferumind.mcp import observation, tool_context, write_tools
+from ferumind.mcp import server as mcp_server
+from ferumind.mcp.models import make_success
+from ferumind.mcp.observation import observe_tool
+from ferumind.mcp.server import mcp, register_all_tools, serve
 
 
 async def _await[T](awaitable: Awaitable[T]) -> T:
@@ -61,7 +61,7 @@ def test_sdk_inbound_message_debug_logging_is_suppressed() -> None:
     previous_level = logger.level
     try:
         logger.setLevel(logging.DEBUG)
-        # This deliberately exercises Lattice's private SDK-boundary hardener.
+        # This deliberately exercises Ferumind's private SDK-boundary hardener.
         mcp_server._suppress_sensitive_sdk_debug_logging()  # pyright: ignore[reportPrivateUsage]
         assert logger.level == logging.INFO
     finally:
@@ -232,7 +232,7 @@ def test_slow_remote_upload_does_not_block_other_mcp_calls(
     workspace: WorkspaceRoot,
     project: str,
 ) -> None:
-    from lattice.core import writes
+    from ferumind.core import writes
 
     def slow_upload(*_args: object, **_kwargs: object) -> ChatGPTSingleUploadResult:
         return ChatGPTSingleUploadResult(

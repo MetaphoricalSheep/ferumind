@@ -32,9 +32,9 @@ from mcp.types import (
 )
 from PIL import Image
 
-from lattice.core.file_uri import build_file_uri
-from lattice.core.paths import WorkspaceRoot, contained_project_root
-from lattice.core.renditions import DEFAULT_IMAGE_EDGE, MAX_IMAGE_RENDITION_BYTES
+from ferumind.core.file_uri import build_file_uri
+from ferumind.core.paths import WorkspaceRoot, contained_project_root
+from ferumind.core.renditions import DEFAULT_IMAGE_EDGE, MAX_IMAGE_RENDITION_BYTES
 
 PROJECT = "demo"
 
@@ -42,10 +42,10 @@ PROJECT = "demo"
 @pytest.fixture
 def project_files(workspace: WorkspaceRoot, large_photo_bytes: bytes) -> dict[str, Path]:
     """A project holding the file shapes this surface has to handle."""
-    from lattice.core.writes import create_project
-    from lattice.db.database import Database
+    from ferumind.core.writes import create_project
+    from ferumind.db.database import Database
 
-    db = Database(workspace / ".lattice" / "lattice.sqlite")
+    db = Database(workspace / ".ferumind" / "ferumind.sqlite")
     db.init_schema()
     conn = db.get_connection()
     try:
@@ -81,7 +81,7 @@ def project_files(workspace: WorkspaceRoot, large_photo_bytes: bytes) -> dict[st
 
 @asynccontextmanager
 async def _client(workspace: WorkspaceRoot) -> AsyncGenerator[ClientSession]:
-    from lattice.mcp import server, tool_context
+    from ferumind.mcp import server, tool_context
 
     tool_context.reset_tool_context()
     tool_context.init_tool_context(Path(workspace))
@@ -208,7 +208,7 @@ class TestProtocolSurface:
 
         templates, resources = run_session(body)
         uris = [template.uriTemplate for template in templates.resourceTemplates]
-        assert "lattice://file/{project}/{encoded_path}" in uris
+        assert "ferumind://file/{project}/{encoded_path}" in uris
         # A project can hold thousands of files; discovery is list_files.
         assert resources.resources == []
 
@@ -230,7 +230,7 @@ class TestListFilesOverProtocol:
         photo = found["library/trip photos/café föto.jpg"]
         assert photo["mime_type"] == "image/jpeg"
         assert photo["context_support"] == "image"
-        assert photo["resource_uri"].startswith("lattice://file/demo/")
+        assert photo["resource_uri"].startswith("ferumind://file/demo/")
         assert found["library/report.pdf"]["context_support"] == "resource_only"
 
     @pytest.mark.usefixtures("project_files")
@@ -427,7 +427,7 @@ class TestReadFileOverProtocol:
         assert encoded not in result.model_dump_json()
 
     @pytest.mark.usefixtures("project_files")
-    def test_missing_and_traversal_paths_produce_lattice_error_codes(
+    def test_missing_and_traversal_paths_produce_ferumind_error_codes(
         self, run_session: Callable[[Any], Any]
     ) -> None:
         async def body(session: ClientSession) -> tuple[CallToolResult, CallToolResult]:
@@ -522,10 +522,10 @@ class TestResourceReadsOverProtocol:
     @pytest.mark.parametrize(
         ("uri", "expected_code"),
         [
-            ("lattice://file/demo/!!!not-base64!!!", "VALIDATION_ERROR"),
-            ("lattice://file/demo", "VALIDATION_ERROR"),
-            ("lattice://file/demo/aGk/extra", "VALIDATION_ERROR"),
-            ("lattice://file/UNKNOWN/aGk", "VALIDATION_ERROR"),
+            ("ferumind://file/demo/!!!not-base64!!!", "VALIDATION_ERROR"),
+            ("ferumind://file/demo", "VALIDATION_ERROR"),
+            ("ferumind://file/demo/aGk/extra", "VALIDATION_ERROR"),
+            ("ferumind://file/UNKNOWN/aGk", "VALIDATION_ERROR"),
         ],
     )
     @pytest.mark.usefixtures("project_files")
@@ -568,7 +568,7 @@ class TestResourceReadsOverProtocol:
     def test_file_over_the_cap_fails_explicitly(
         self, run_session: Callable[[Any], Any], monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from lattice.core import file_reads
+        from ferumind.core import file_reads
 
         monkeypatch.setattr(file_reads, "MAX_RESOURCE_READ_BYTES", 32)
 
@@ -584,10 +584,10 @@ class TestObservationTelemetry:
     def test_file_calls_and_resource_reads_record_metadata_only(
         self, run_session: Callable[[Any], Any], workspace: WorkspaceRoot
     ) -> None:
-        from lattice.core.observations import list_observations
-        from lattice.db.database import Database
-        from lattice.mcp.observation import apply_observation_to_all_tools
-        from lattice.mcp.server import mcp
+        from ferumind.core.observations import list_observations
+        from ferumind.db.database import Database
+        from ferumind.mcp.observation import apply_observation_to_all_tools
+        from ferumind.mcp.server import mcp
 
         apply_observation_to_all_tools(mcp)
 
@@ -601,7 +601,7 @@ class TestObservationTelemetry:
 
         run_session(body)
 
-        db = Database(workspace / ".lattice" / "lattice.sqlite")
+        db = Database(workspace / ".ferumind" / "ferumind.sqlite")
         conn = db.get_connection()
         try:
             observed = {row.tool_name: row for row in list_observations(conn, limit=50)}

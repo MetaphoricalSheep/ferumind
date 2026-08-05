@@ -19,11 +19,11 @@ import anyio
 import pytest
 from mcp.types import CallToolResult
 
-from lattice.core.edit_targets import ExactEdit, InsertAnchor
-from lattice.core.format import write_format_marker
-from lattice.core.observations import list_observations
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.writes import ChatGPTFileInput
+from ferumind.core.edit_targets import ExactEdit, InsertAnchor
+from ferumind.core.format import write_format_marker
+from ferumind.core.observations import list_observations
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.writes import ChatGPTFileInput
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -39,7 +39,7 @@ async def _await_tool_result(awaitable: Awaitable[CallToolResult]) -> CallToolRe
 @pytest.fixture
 def run_test_remote_uploads_inline(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep surface tests focused on results; offload behavior has a dedicated test."""
-    from lattice.mcp import write_tools
+    from ferumind.mcp import write_tools
 
     async def run_inline[T](
         func: Callable[..., T],
@@ -74,8 +74,8 @@ def _ensure_observed() -> None:
     global _observed
     if _observed:
         return
-    from lattice.mcp.observation import apply_observation_to_all_tools
-    from lattice.mcp.server import mcp
+    from ferumind.mcp.observation import apply_observation_to_all_tools
+    from ferumind.mcp.server import mcp
 
     apply_observation_to_all_tools(mcp)
     _observed = True
@@ -87,7 +87,7 @@ def tools(
     run_test_remote_uploads_inline: None,
 ) -> Iterator[ToolMap]:
     """The full registered tool surface bound to a fresh workspace."""
-    from lattice.mcp import server, tool_context
+    from ferumind.mcp import server, tool_context
 
     tool_context.reset_tool_context()
     tool_context.init_tool_context(Path(workspace))
@@ -187,7 +187,7 @@ class TestSurfaceShape:
 
     @pytest.mark.usefixtures("tools")
     def test_annotation_taxonomy(self) -> None:
-        from lattice.mcp.server import mcp
+        from ferumind.mcp.server import mcp
 
         registered = cast(
             "dict[str, Any]",
@@ -343,7 +343,7 @@ class TestCompactTools:
 
     @pytest.mark.usefixtures("tools")
     def test_no_tool_takes_a_session_parameter(self) -> None:
-        from lattice.mcp.server import mcp
+        from ferumind.mcp.server import mcp
 
         registered = cast(
             "dict[str, Any]",
@@ -356,7 +356,7 @@ class TestCompactTools:
 
     def test_session_id_is_gone_from_source(self) -> None:
         result = subprocess.run(
-            ["grep", "-ri", "session_id", "src/lattice/mcp/"],
+            ["grep", "-ri", "session_id", "src/ferumind/mcp/"],
             cwd=REPO_ROOT,
             capture_output=True,
             text=True,
@@ -371,7 +371,7 @@ class TestColdCallability:
     def test_every_tool_cold(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from lattice.core import writes
+        from ferumind.core import writes
 
         monkeypatch.setattr(writes, "fetch_remote_file", _fake_fetch(b"cold call chatgpt bytes"))
 
@@ -729,7 +729,7 @@ class TestUploadLibraryFile:
         # Exercise the boundary against a small patched cap rather than
         # allocating/base64-encoding a real MAX_CHUNK_BYTES-sized payload
         # (upload_library_file shares the single-call cap with one chunk).
-        from lattice.core import writes
+        from ferumind.core import writes
 
         monkeypatch.setattr(writes, "MAX_CHUNK_BYTES", 16)
         too_big = call(
@@ -818,7 +818,7 @@ class TestChatGPTFileUpload:
     """upload_library_files_from_chatgpt: openai/fileParams descriptor + batch semantics."""
 
     def test_tool_descriptor_matches_chatgpt_file_schema_exactly(self) -> None:
-        from lattice.mcp.server import mcp
+        from ferumind.mcp.server import mcp
 
         registered = cast(
             "dict[str, Any]",
@@ -845,7 +845,7 @@ class TestChatGPTFileUpload:
 
     def test_tools_list_wire_output_carries_meta_and_schema(self) -> None:
         """Not just the internal Python object — the actual serialized tools/list payload."""
-        from lattice.mcp.server import mcp
+        from ferumind.mcp.server import mcp
 
         listed = anyio.run(mcp.list_tools)
         tool = next(t for t in listed if t.name == "upload_library_files_from_chatgpt")
@@ -866,7 +866,7 @@ class TestChatGPTFileUpload:
     def test_downloads_and_stores_via_normal_ingestion_pipeline(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from lattice.core import writes
+        from ferumind.core import writes
 
         monkeypatch.setattr(writes, "fetch_remote_file", _fake_fetch(b"downloaded chatgpt bytes"))
         result = ok(
@@ -897,7 +897,7 @@ class TestChatGPTFileUpload:
     def test_multiple_files_in_one_call(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from lattice.core import writes
+        from ferumind.core import writes
 
         monkeypatch.setattr(writes, "fetch_remote_file", _fake_fetch_echoing_url())
         result = ok(
@@ -919,8 +919,8 @@ class TestChatGPTFileUpload:
     def test_partial_batch_failure_is_explicit(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from lattice.core import writes
-        from lattice.core.errors import DownloadFailedError
+        from ferumind.core import writes
+        from ferumind.core.errors import DownloadFailedError
 
         def fake_fetch(url: str, **kwargs: object) -> bytes:
             if "bad" in url:
@@ -977,7 +977,7 @@ class TestChatGPTFileUpload:
         which travels with its bytes. A parallel array of names could only be
         matched positionally, which is not a guarantee ChatGPT makes.
         """
-        from lattice.mcp.server import mcp
+        from ferumind.mcp.server import mcp
 
         registered = cast(
             "dict[str, Any]",
@@ -991,7 +991,7 @@ class TestChatGPTSingleFileUpload:
     """upload_library_file_from_chatgpt: one file, one caller-chosen filename."""
 
     def test_tool_descriptor_declares_a_single_top_level_file_param(self) -> None:
-        from lattice.mcp.server import mcp
+        from ferumind.mcp.server import mcp
 
         registered = cast(
             "dict[str, Any]",
@@ -1016,7 +1016,7 @@ class TestChatGPTSingleFileUpload:
         assert set(tool.parameters["required"]) == {"project", "file", "filename"}
 
     def test_tools_list_wire_output_carries_meta_and_schema(self) -> None:
-        from lattice.mcp.server import mcp
+        from ferumind.mcp.server import mcp
 
         listed = anyio.run(mcp.list_tools)
         tool = next(t for t in listed if t.name == "upload_library_file_from_chatgpt")
@@ -1034,7 +1034,7 @@ class TestChatGPTSingleFileUpload:
     def test_stores_under_the_requested_filename(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from lattice.core import writes
+        from ferumind.core import writes
 
         monkeypatch.setattr(writes, "fetch_remote_file", _fake_fetch(b"single file bytes"))
         result = ok(
@@ -1059,8 +1059,8 @@ class TestChatGPTSingleFileUpload:
     def test_download_failure_is_a_tool_error_not_a_partial_result(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from lattice.core import writes
-        from lattice.core.errors import DownloadFailedError
+        from ferumind.core import writes
+        from ferumind.core.errors import DownloadFailedError
 
         def fake_fetch(url: str, **kwargs: object) -> bytes:
             raise DownloadFailedError("simulated failure")
@@ -1103,7 +1103,7 @@ class TestGetContextContract:
 
     def test_observation_rows_carry_payload_metrics(self, tools: ToolMap, demo: str) -> None:
         """§10.6: get_context observations carry the three payload metrics."""
-        from lattice.mcp.tool_context import require_database
+        from ferumind.mcp.tool_context import require_database
 
         ok(tools, "get_context", project=demo)
         conn = require_database().get_connection()
@@ -1130,7 +1130,7 @@ class TestPathSafety:
             "../other/spine.md",
             "/etc/passwd",
             "canvases/../../../../etc/passwd",
-            ".lattice/snapshots/x.md",
+            ".ferumind/snapshots/x.md",
         ],
     )
     def test_reads_and_writes_reject_escapes(
@@ -1140,7 +1140,7 @@ class TestPathSafety:
         workspace: WorkspaceRoot,
         path: str,
     ) -> None:
-        if path.startswith(".lattice/"):
+        if path.startswith(".ferumind/"):
             internal = workspace / "projects" / demo / path
             internal.parent.mkdir(parents=True, exist_ok=True)
             internal.write_text("# internal data\n", encoding="utf-8")
@@ -1211,7 +1211,7 @@ class TestWireLevelConversion:
 
     @pytest.mark.usefixtures("tools")
     def test_no_tool_advertises_an_output_schema(self) -> None:
-        from lattice.mcp.server import mcp
+        from ferumind.mcp.server import mcp
 
         listed = anyio.run(mcp.list_tools)
         assert len(listed) == 46
@@ -1219,7 +1219,7 @@ class TestWireLevelConversion:
 
     @pytest.mark.usefixtures("tools")
     def test_envelope_survives_conversion_on_success_and_error(self) -> None:
-        from lattice.mcp.server import mcp
+        from ferumind.mcp.server import mcp
 
         async def scenario() -> tuple[object, object]:
             created = await mcp.call_tool("create_project", {"key": "demo", "title": "Demo"})

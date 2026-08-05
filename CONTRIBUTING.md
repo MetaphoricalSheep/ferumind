@@ -1,6 +1,6 @@
 # Contributing
 
-Lattice stores real user knowledge, so safety and compatibility changes need
+Ferumind stores real user knowledge, so safety and compatibility changes need
 the same care as application logic.
 
 ## Development setup
@@ -18,7 +18,7 @@ specification wins.
 
 ## Pull requests
 
-- Keep core behavior in `lattice.core`; MCP, CLI, and workers call core.
+- Keep core behavior in `ferumind.core`; MCP, CLI, and workers call core.
 - Add deterministic success and failure tests, including adversarial tests
   for paths, files, network inputs, and concurrency where relevant.
 - Do not add untyped public APIs, unjustified `Any`, broad exception

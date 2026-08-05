@@ -3,7 +3,7 @@ name: safe-filesystem
 description: Use when changing filesystem paths, reads, writes, moves, archives, snapshots, permissions, locking, or workspace boundaries.
 compatibility: opencode, claude-code, cursor, copilot, codex
 metadata:
-  project: lattice
+  project: ferumind
   role: filesystem-security
 ---
 
@@ -31,7 +31,7 @@ metadata:
 - Never resolve only the candidate path while leaving the root unresolved.
 - Never allow absolute paths where the API expects project-relative paths.
 - Never follow symlinks without validating the final resolved path remains inside the allowed root.
-- All containment checks must go through the central `is_under_root()` helper in `lattice.core.paths`.
+- All containment checks must go through the central `is_under_root()` helper in `ferumind.core.paths`.
 - Any change to path validation requires adversarial tests.
 
 ## Safety Flow
@@ -60,6 +60,6 @@ Prefer the narrowest safe edit target over replacing a whole Markdown body.
 - Frontmatter is protected: range/match edits overlapping the frontmatter block
   are rejected (`FRONTMATTER_PROTECTED`), required keys cannot be stripped
   (`FRONTMATTER_REQUIRED`), and `updated` is refreshed automatically.
-- `.lattice/` internals are never patchable through MCP.
+- `.ferumind/` internals are never patchable through MCP.
 - `propose_patch mode=body|full` is the coarse fallback for whole-document
   replacement only.

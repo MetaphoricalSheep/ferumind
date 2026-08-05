@@ -11,9 +11,9 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from lattice.core.image_maintenance import compress_project_images
-from lattice.core.images import ImagePolicy
-from lattice.core.paths import WorkspaceRoot, contained_project_root
+from ferumind.core.image_maintenance import compress_project_images
+from ferumind.core.images import ImagePolicy
+from ferumind.core.paths import WorkspaceRoot, contained_project_root
 from tests.conftest import photograph_like
 
 
@@ -149,11 +149,11 @@ class TestCompressProjectImages:
         recovered = (snapshot_dir / "before" / "library/photos/a.jpg").read_bytes()
         assert recovered == original
 
-    def test_never_descends_into_lattice_internal_state(
+    def test_never_descends_into_ferumind_internal_state(
         self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str, project_root: Path
     ) -> None:
         """Compressing snapshot copies would destroy the recovery path."""
-        internal = project_root / ".lattice" / "snapshots" / "old"
+        internal = project_root / ".ferumind" / "snapshots" / "old"
         internal.mkdir(parents=True, exist_ok=True)
         buffer = io.BytesIO()
         photograph_like(3000, 2000).save(buffer, format="JPEG", quality=95)

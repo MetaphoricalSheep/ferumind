@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from lattice.core.errors import UnknownFolderError
-from lattice.core.folders import (
+from ferumind.core.errors import UnknownFolderError
+from ferumind.core.folders import (
     archive_path_for,
     default_edit_policy,
     folder_of,
