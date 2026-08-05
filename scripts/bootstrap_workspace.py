@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Initialize a Lattice v2 workspace.
+"""Initialize a Ferumind v2 workspace.
 
 Creates the workspace skeleton per product/spec-mcp.md §2 and installs the
 contract content from product/contract/ (the source of record) into
@@ -19,11 +19,11 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
-from lattice.core.errors import FormatUnsupportedError
-from lattice.core.file_io import atomic_write_text
-from lattice.core.format import read_format
-from lattice.core.locks import acquire_workspace_lock
-from lattice.core.paths import WorkspaceRoot, contained_path
+from ferumind.core.errors import FormatUnsupportedError
+from ferumind.core.file_io import atomic_write_text
+from ferumind.core.format import read_format
+from ferumind.core.locks import acquire_workspace_lock
+from ferumind.core.paths import WorkspaceRoot, contained_path
 
 FORMAT_VERSION = 2
 
@@ -35,6 +35,7 @@ CONTRACT_INSTALLS: dict[str, str] = {
     "rules/00-contract.md": "system/rules/00-contract.md",
     "rules/10-editing.md": "system/rules/10-editing.md",
     "rules/20-memory.md": "system/rules/20-memory.md",
+    "rules/30-reminders.md": "system/rules/30-reminders.md",
     "bootstrap.md": "system/prompts/bootstrap.md",
     "templates/spine.md": "system/templates/spine.md",
     "templates/project-rules.md": "system/templates/project-rules.md",
@@ -50,9 +51,9 @@ DIRECTORIES: list[str] = [
 ]
 
 AGENTS_POINTER = """\
-# Lattice workspace
+# Ferumind workspace
 
-This is a Lattice v2 workspace. It is live user data, not source code.
+This is a Ferumind v2 workspace. It is live user data, not source code.
 
 - The rules that govern how agents work here live in `system/rules/`
   (read them in lexical order; project rules in `projects/<key>/rules/`
@@ -93,7 +94,7 @@ def bootstrap(workspace: Path, force: bool) -> list[str]:
         if found_format != FORMAT_VERSION:
             raise FormatUnsupportedError(
                 "Refusing to bootstrap an existing workspace whose format "
-                f"is not {FORMAT_VERSION!r}; run `lattice migrate` explicitly",
+                f"is not {FORMAT_VERSION!r}; run `ferumind migrate` explicitly",
                 details={
                     "found_format": found_format,
                     "supported_format": FORMAT_VERSION,
@@ -110,18 +111,18 @@ def bootstrap(workspace: Path, force: bool) -> list[str]:
             if found_format != FORMAT_VERSION:
                 raise FormatUnsupportedError(
                     "Refusing to bootstrap a workspace whose format "
-                    f"is not {FORMAT_VERSION!r}; run `lattice migrate` explicitly",
+                    f"is not {FORMAT_VERSION!r}; run `ferumind migrate` explicitly",
                     details={
                         "found_format": found_format,
                         "supported_format": FORMAT_VERSION,
                     },
                 )
         elif existing_content or any(
-            entry.name != ".lattice" for entry in workspace_root.iterdir()
+            entry.name != ".ferumind" for entry in workspace_root.iterdir()
         ):
             raise FormatUnsupportedError(
                 "Refusing to bootstrap an existing workspace without a format marker; "
-                "run `lattice migrate` explicitly",
+                "run `ferumind migrate` explicitly",
                 details={
                     "found_format": None,
                     "supported_format": FORMAT_VERSION,
@@ -135,7 +136,7 @@ def bootstrap(workspace: Path, force: bool) -> list[str]:
             directory.chmod(0o700)
 
         meta = (
-            "# Lattice workspace metadata. Managed by Lattice; do not edit by hand.\n"
+            "# Ferumind workspace metadata. Managed by Ferumind; do not edit by hand.\n"
             f"format: {FORMAT_VERSION}\n"
             f'created: "{datetime.now(UTC).date().isoformat()}"\n'
         )

@@ -9,14 +9,14 @@ from typing import cast
 
 from mcp.types import CallToolResult, TextContent
 
-from lattice.core.observations import (
+from ferumind.core.observations import (
     get_observation,
     list_observations,
     new_correlation_id,
     record_mcp_call_observation,
 )
-from lattice.mcp import observation as observation_module
-from lattice.mcp.models import make_success
+from ferumind.mcp import observation as observation_module
+from ferumind.mcp.models import make_success
 
 # This focused test deliberately exercises an internal size helper. Resolve it
 # dynamically so strict typing does not mistake the test-only access for a

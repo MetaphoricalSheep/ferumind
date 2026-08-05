@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core import writes as writes_module
-from lattice.core.documents import compute_sha256
-from lattice.core.errors import (
+from ferumind.core import writes as writes_module
+from ferumind.core.documents import compute_sha256
+from ferumind.core.errors import (
     CannotArchiveSpineError,
     DocumentArchivedError,
     DocumentExistsError,
@@ -30,19 +30,19 @@ from lattice.core.errors import (
     ValidationError,
     WorkspaceMismatchError,
 )
-from lattice.core.frontmatter import parse_frontmatter
-from lattice.core.locks import acquire_project_lock
-from lattice.core.operations import get_operation
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.registry import ProjectEntry, load_registry, require_project, save_registry
-from lattice.core.snapshots import (
+from ferumind.core.frontmatter import parse_frontmatter
+from ferumind.core.locks import acquire_project_lock
+from ferumind.core.operations import get_operation
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.registry import ProjectEntry, load_registry, require_project, save_registry
+from ferumind.core.snapshots import (
     create_snapshot,
     find_snapshot_dir,
     new_snapshot_id,
     read_snapshot_before_content,
     record_snapshot_in_db,
 )
-from lattice.core.writes import (
+from ferumind.core.writes import (
     apply_patch,
     archive_document,
     capture_note,
@@ -55,7 +55,7 @@ from lattice.core.writes import (
     restore_snapshot,
     unarchive_document,
 )
-from lattice.db.database import Database
+from ferumind.db.database import Database
 
 
 @pytest.fixture
@@ -130,7 +130,7 @@ class TestProposeApply:
             old_string="alpha",
             new_string="ALPHA",
         )
-        snapshots_root = workspace / "projects" / project / ".lattice" / "snapshots"
+        snapshots_root = workspace / "projects" / project / ".ferumind" / "snapshots"
         before_dirs: set[Path] = (
             {Path(entry) for entry in snapshots_root.iterdir()}
             if snapshots_root.is_dir()
@@ -898,7 +898,7 @@ class TestCreateProject:
             save_registry(workspace_arg, registry_arg)
 
         monkeypatch.setattr(
-            "lattice.core.writes.save_registry",
+            "ferumind.core.writes.save_registry",
             pause_before_publication,
         )
 
@@ -955,7 +955,7 @@ class TestCreateProject:
         ) -> None:
             raise OSError("synthetic pre-replace registry failure")
 
-        monkeypatch.setattr("lattice.core.writes.save_registry", fail_before_replace)
+        monkeypatch.setattr("ferumind.core.writes.save_registry", fail_before_replace)
         with pytest.raises(OSError, match="pre-replace"):
             create_project(conn, workspace, key="unpublished", title="Unpublished")
 
@@ -979,7 +979,7 @@ class TestCreateProject:
             save_registry(workspace_arg, registry_arg)
             raise OSError("synthetic post-replace fsync failure")
 
-        monkeypatch.setattr("lattice.core.writes.save_registry", save_then_fail)
+        monkeypatch.setattr("ferumind.core.writes.save_registry", save_then_fail)
         result = create_project(conn, workspace, key="durable", title="Durable")
 
         assert result.key == "durable"

@@ -10,12 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core import migrate as migrate_module
-from lattice.core.errors import FormatUnsupportedError
-from lattice.core.format import read_format, write_format_marker
-from lattice.core.migrate import MIGRATORS, plan_migration, run_migration
-from lattice.core.operations import list_operations
-from lattice.core.paths import PathSafetyError, WorkspaceRoot
+from ferumind.core import migrate as migrate_module
+from ferumind.core.errors import FormatUnsupportedError
+from ferumind.core.format import read_format, write_format_marker
+from ferumind.core.migrate import MIGRATORS, plan_migration, run_migration
+from ferumind.core.operations import list_operations
+from ferumind.core.paths import PathSafetyError, WorkspaceRoot
 
 
 def test_shipped_migrator_registry_is_empty() -> None:
@@ -95,7 +95,7 @@ def test_run_migration_backs_up_migrates_and_bumps(
     project: str,
 ) -> None:
     write_format_marker(workspace, 1)
-    backup_dir = workspace / ".lattice/test-backups"
+    backup_dir = workspace / ".ferumind/test-backups"
 
     def fake_migrator(ws: WorkspaceRoot) -> None:
         (ws / "system" / "migrated.txt").write_text("done", encoding="utf-8")
@@ -112,7 +112,7 @@ def test_run_migration_backs_up_migrates_and_bumps(
         names = tar.getnames()
     assert "workspace/system/meta.yml" in names
     assert "workspace/system/migrated.txt" not in names
-    assert "workspace/.lattice/lattice.sqlite" in names
+    assert "workspace/.ferumind/ferumind.sqlite" in names
 
     ops = [op for op in list_operations(conn, project) if op.operation_type == "migrate"]
     assert ops
@@ -149,11 +149,13 @@ def test_default_backup_is_private_internal_and_does_not_archive_itself(
 
     assert report.backup_path is not None
     backup = Path(report.backup_path)
-    assert backup.is_relative_to(workspace / ".lattice/backups")
+    assert backup.is_relative_to(workspace / ".ferumind/backups")
     assert backup.is_file()
     assert backup.stat().st_mode & 0o777 == 0o600
     with tarfile.open(backup) as archive:
-        assert not any(name.startswith("workspace/.lattice/backups") for name in archive.getnames())
+        assert not any(
+            name.startswith("workspace/.ferumind/backups") for name in archive.getnames()
+        )
 
 
 def test_migration_refuses_backup_outside_workspace(

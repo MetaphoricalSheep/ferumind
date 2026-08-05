@@ -1,4 +1,4 @@
-# Lattice Testing Guide
+# Ferumind Testing Guide
 
 ## Verification
 
@@ -17,7 +17,7 @@ uv run python scripts/check_public_tree.py
 uv run ruff format --check .
 uv run ruff check .
 uv run pyright
-uv run pytest --cov=src/lattice
+uv run pytest --cov=src/ferumind
 ```
 
 Coverage must remain at or above 80%.

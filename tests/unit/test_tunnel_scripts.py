@@ -23,14 +23,14 @@ def _isolated_tunnel_script(tmp_path: Path) -> tuple[Path, dict[str, str]]:
     scripts = repo / "scripts"
     scripts.mkdir(parents=True)
     tunnel = scripts / "tunnel.sh"
-    wrapper = scripts / "lattice-mcp-stdio"
+    wrapper = scripts / "ferumind-mcp-stdio"
     shutil.copy2(_script_path("tunnel.sh"), tunnel)
-    shutil.copy2(_script_path("lattice-mcp-stdio"), wrapper)
+    shutil.copy2(_script_path("ferumind-mcp-stdio"), wrapper)
     environment = dict(os.environ)
     for name in (
         "CI",
-        "LATTICE_TUNNEL_PROFILE",
-        "LATTICE_WORKSPACE",
+        "FERUMIND_TUNNEL_PROFILE",
+        "FERUMIND_WORKSPACE",
         "TUNNEL_CLIENT_BIN",
     ):
         environment.pop(name, None)
@@ -57,11 +57,11 @@ def test_tunnel_script_executable() -> None:
 
 
 def test_mcp_stdio_wrapper_exists() -> None:
-    assert _script_path("lattice-mcp-stdio").is_file()
+    assert _script_path("ferumind-mcp-stdio").is_file()
 
 
 def test_mcp_stdio_wrapper_executable() -> None:
-    assert _is_executable(_script_path("lattice-mcp-stdio"))
+    assert _is_executable(_script_path("ferumind-mcp-stdio"))
 
 
 # ── bash syntax ───────────────────────────────────────────────────────────
@@ -78,29 +78,29 @@ def test_tunnel_script_syntax() -> None:
 
 def test_mcp_stdio_wrapper_syntax() -> None:
     result = subprocess.run(
-        ["bash", "-n", str(_script_path("lattice-mcp-stdio"))],
+        ["bash", "-n", str(_script_path("ferumind-mcp-stdio"))],
         capture_output=True,
         text=True,
     )
     assert result.returncode == 0, f"Syntax error:\n{result.stderr}"
 
 
-# ── lattice-mcp-stdio content constraints ─────────────────────────────────
+# ── ferumind-mcp-stdio content constraints ─────────────────────────────────
 
 
 def test_mcp_stdio_wrapper_no_echo() -> None:
-    text = _script_path("lattice-mcp-stdio").read_text()
-    assert "echo " not in text, "lattice-mcp-stdio must not use echo"
+    text = _script_path("ferumind-mcp-stdio").read_text()
+    assert "echo " not in text, "ferumind-mcp-stdio must not use echo"
 
 
 def test_mcp_stdio_wrapper_no_printf() -> None:
-    text = _script_path("lattice-mcp-stdio").read_text()
-    assert "printf " not in text, "lattice-mcp-stdio must not use printf"
+    text = _script_path("ferumind-mcp-stdio").read_text()
+    assert "printf " not in text, "ferumind-mcp-stdio must not use printf"
 
 
 def test_mcp_stdio_wrapper_execs_uv_run() -> None:
-    text = _script_path("lattice-mcp-stdio").read_text()
-    assert "exec uv run lattice mcp serve" in text
+    text = _script_path("ferumind-mcp-stdio").read_text()
+    assert "exec uv run ferumind mcp serve" in text
 
 
 # ── tunnel.sh content constraints ─────────────────────────────────────────
@@ -184,7 +184,7 @@ def test_background_start_is_verified_before_pid_record_is_published() -> None:
 
 
 def test_mcp_wrapper_strips_control_plane_credentials() -> None:
-    text = _script_path("lattice-mcp-stdio").read_text()
+    text = _script_path("ferumind-mcp-stdio").read_text()
     assert "unset CONTROL_PLANE_API_KEY CONTROL_PLANE_TUNNEL_ID" in text
 
 
@@ -225,7 +225,7 @@ def test_background_start_does_not_publish_pid_for_early_exit(tmp_path: Path) ->
         text=True,
     )
 
-    pid_file = tmp_path / "config" / "tunnel-client" / "lattice.pid"
+    pid_file = tmp_path / "config" / "tunnel-client" / "ferumind.pid"
     assert result.returncode != 0
     assert not pid_file.exists()
     assert "exited" in result.stderr

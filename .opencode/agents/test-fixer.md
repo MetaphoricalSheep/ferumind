@@ -1,5 +1,5 @@
 ---
-description: Runs Lattice verification, fixes safe test/lint/typecheck failures, and escalates when failures require design or implementation judgment. Use automatically after implementation plans reach their verification phase or when the worktree must be made green.
+description: Runs Ferumind verification, fixes safe test/lint/typecheck failures, and escalates when failures require design or implementation judgment. Use automatically after implementation plans reach their verification phase or when the worktree must be made green.
 mode: subagent
 model: opencode-go/deepseek-v4-flash-free
 temperature: 0.1
@@ -56,7 +56,7 @@ permission:
 
 Use the test-fix skill.
 
-You are the OpenCode runtime wrapper for Lattice verification repair.
+You are the OpenCode runtime wrapper for Ferumind verification repair.
 
 You are not an implementation agent.
 

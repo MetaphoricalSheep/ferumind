@@ -8,18 +8,18 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core import reconcile as reconcile_module
-from lattice.core.documents import compute_sha256
-from lattice.core.indexer import get_indexed_signature, index_project
-from lattice.core.operations import get_operation, list_operations
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.reconcile import (
+from ferumind.core import reconcile as reconcile_module
+from ferumind.core.documents import compute_sha256
+from ferumind.core.indexer import get_indexed_signature, index_project
+from ferumind.core.operations import get_operation, list_operations
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.reconcile import (
     reconcile_document,
     reconcile_project,
     record_watch_detection,
 )
-from lattice.core.snapshots import list_snapshots_from_db
-from lattice.core.writes import propose_exact_replace_patch
+from ferumind.core.snapshots import list_snapshots_from_db
+from ferumind.core.writes import propose_exact_replace_patch
 
 
 def _hand_edit(workspace: WorkspaceRoot, project: str, rel: str, extra: str) -> None:

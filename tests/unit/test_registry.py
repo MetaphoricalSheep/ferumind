@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import pytest
 
-from lattice.core import registry as registry_core
-from lattice.core.errors import ProjectNotFoundError, ProjectRequiredError, ValidationError
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.registry import (
+from ferumind.core import registry as registry_core
+from ferumind.core.errors import ProjectNotFoundError, ProjectRequiredError, ValidationError
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.registry import (
     ProjectEntry,
     add_registry_entry,
     list_entries,

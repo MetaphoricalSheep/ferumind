@@ -3,7 +3,7 @@ name: python-principal-engineer
 description: Use when designing, implementing, or reviewing typed Python modules, public APIs, architecture boundaries, or dependency choices.
 compatibility: opencode, claude-code, cursor, copilot, codex
 metadata:
-  project: lattice
+  project: ferumind
   role: python-engineering
 ---
 

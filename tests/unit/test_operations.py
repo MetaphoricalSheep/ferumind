@@ -7,9 +7,9 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from lattice.core import operations as operations_module
-from lattice.core.errors import InvalidOperationError, ValidationError
-from lattice.core.operations import (
+from ferumind.core import operations as operations_module
+from ferumind.core.errors import InvalidOperationError, ValidationError
+from ferumind.core.operations import (
     OP_DISCARDED,
     OP_EXPIRED,
     OP_PENDING,
@@ -26,7 +26,7 @@ from lattice.core.operations import (
     record_proposal,
     sweep_expired_proposals,
 )
-from lattice.core.types import JsonObject
+from ferumind.core.types import JsonObject
 
 
 def _proposal(conn: sqlite3.Connection, project: str = "demo", path: str = "canvases/a.md") -> str:

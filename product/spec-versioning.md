@@ -7,12 +7,12 @@ overlap, the amendments in spec-mcp §4/§7/§8 are the same decisions restated.
 
 ## 0. The principle: version the workspace, not the API
 
-Three things change shape over Lattice's life, and they get three different
+Three things change shape over Ferumind's life, and they get three different
 treatments:
 
 | What | Versioned how | Migrated how |
 |---|---|---|
-| Workspace format (folders, frontmatter contract, `system/` files) | `format:` in `workspace/system/meta.yml` | Explicit `lattice migrate`, human-triggered, snapshot-protected |
+| Workspace format (folders, frontmatter contract, `system/` files) | `format:` in `workspace/system/meta.yml` | Explicit `ferumind migrate`, human-triggered, snapshot-protected |
 | DB schema | `PRAGMA user_version` + numbered migrations | Automatic at startup (system state, largely rebuildable) |
 | MCP tool surface / contract text | **Not wire-versioned** | Additive within a format version; breaking changes ride a format bump |
 
@@ -32,7 +32,7 @@ removals only happen together with a format bump.
 `workspace/system/meta.yml`, human-readable, part of the Markdown-side truth:
 
 ```yaml
-# Lattice workspace metadata. Managed by Lattice; do not edit by hand.
+# Ferumind workspace metadata. Managed by Ferumind; do not edit by hand.
 format: 2
 created: "2026-07-12"
 ```
@@ -45,7 +45,7 @@ created: "2026-07-12"
   a one-way importer (Phase 5, D14), never by running two formats side by
   side.
 - `bootstrap_workspace.py` writes the marker when initializing a workspace;
-  `lattice migrate` rewrites it as the final step of a successful migration.
+  `ferumind migrate` rewrites it as the final step of a successful migration.
 
 ### 1.2 Server behavior on mismatch
 
@@ -61,7 +61,7 @@ to out-of-band edits like everything else):
 
 - `FORMAT_UNSUPPORTED` is a machine-readable error code (spec-mcp §7). Its
   message states the found format, the supported format, and the remedy
-  (`run: lattice migrate` for old workspaces; upgrade the server for new
+  (`run: ferumind migrate` for old workspaces; upgrade the server for new
   ones).
 - Reads stay open on an old workspace deliberately: the library must remain
   consultable while the human decides when to migrate. A newer-than-supported
@@ -70,12 +70,12 @@ to out-of-band edits like everything else):
 - `get_context` echoes `"format": 2` in its payload block so the workspace
   version is visible in transcripts and the observation log.
 
-### 1.3 `lattice migrate` (explicit, human-triggered)
+### 1.3 `ferumind migrate` (explicit, human-triggered)
 
 Decided: migration of user Markdown is never implicit. The CLI command:
 
 ```
-lattice migrate [--dry-run]
+ferumind migrate [--dry-run]
 ```
 
 1. Reads `meta.yml`, resolves the chain of registered format migrators
@@ -88,8 +88,8 @@ lattice migrate [--dry-run]
 4. Bumps `meta.yml`, triggers a full reindex, writes an operation-log entry
    (`operation_type: migrate`).
 
-If a migrator fails after transformation begins, Lattice writes
-`.lattice/MIGRATION_RECOVERY_REQUIRED.json` with the private backup path and
+If a migrator fails after transformation begins, Ferumind writes
+`.ferumind/MIGRATION_RECOVERY_REQUIRED.json` with the private backup path and
 refuses to rerun migration. The operator must restore that backup before a
 retry; an in-place migrator is never replayed over a partially transformed
 workspace. Migration audit rows are committed as one SQLite transaction.
@@ -178,7 +178,7 @@ Replaces the ad-hoc `_add_column` calls in `db/database.py`:
 
 - `PRAGMA user_version` tracks the schema version (starts at the number of
   shipped migrations).
-- Migrations are numbered files in `src/lattice/db/migrations/`
+- Migrations are numbered files in `src/ferumind/db/migrations/`
   (`0001_<slug>.sql`, or `.py` when data transformation is needed), applied
   in order inside a transaction at startup by `Database.init_schema()`;
   `user_version` bumps per migration.
@@ -200,7 +200,7 @@ spec-mcp §8, and the no-DB-files-in-git rule.
 - **Phase 0**: DB migration framework (§2.4) lands first; the de-session
   migration and the table drops (§2.2) are its first real migrations.
 - **Phase 1**: `meta.yml` written by `bootstrap_workspace.py`; FTS5 schema +
-  indexer (§2.3); `FORMAT_UNSUPPORTED` gate in core; `lattice migrate`
+  indexer (§2.3); `FORMAT_UNSUPPORTED` gate in core; `ferumind migrate`
   frame (§1.3).
 - **Phase 2**: `get_context` format echo; `FORMAT_UNSUPPORTED` in the MCP
   error surface (spec-mcp §7).

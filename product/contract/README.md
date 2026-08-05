@@ -9,6 +9,7 @@ live workspace by `scripts/bootstrap_workspace.py`:
 | `rules/00-contract.md` | `workspace/system/rules/00-contract.md` |
 | `rules/10-editing.md` | `workspace/system/rules/10-editing.md` |
 | `rules/20-memory.md` | `workspace/system/rules/20-memory.md` |
+| `rules/30-reminders.md` | `workspace/system/rules/30-reminders.md` |
 | `bootstrap.md` | `workspace/system/prompts/bootstrap.md` |
 | `templates/spine.md` | `workspace/system/templates/spine.md` |
 | `templates/project-rules.md` | `workspace/system/templates/project-rules.md` |

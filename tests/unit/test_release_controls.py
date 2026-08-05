@@ -33,7 +33,7 @@ def _frontmatter(path: Path) -> dict[str, object]:
         (".env.example", True),
         (".env", False),
         (".env.production", False),
-        ("data/lattice.sqlite", False),
+        ("data/ferumind.sqlite", False),
         ("keys/id_ed25519.pub", False),
         (".github/instructions/generated.md", False),
         (".github/workflows/ci.yml", True),

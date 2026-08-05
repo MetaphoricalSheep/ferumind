@@ -1,8 +1,8 @@
-# Lattice — Agent Instructions
+# Ferumind — Agent Instructions
 
 ## Mission
 
-**Chats are disposable; Lattice is where the continuity lives.** Lattice is a
+**Chats are disposable; Ferumind is where the continuity lives.** Ferumind is a
 local-first, Markdown-backed workspace shared by a human and their agents:
 they collaborate in working documents, agents keep auditable memory there, and
 durable knowledge settles into a retrievable library. It provides a hardened
@@ -11,8 +11,8 @@ rollback, and SQLite-backed indexing/search/operation logs.
 
 ## Product status
 
-This repository is **Lattice v2**. The locked product design lives in
-`product/` ([00-what-is-lattice.md](product/00-what-is-lattice.md) and the
+This repository is **Ferumind v2**. The locked product design lives in
+`product/` ([00-what-is-ferumind.md](product/00-what-is-ferumind.md) and the
 specs beside it); where existing code conflicts with
 [product/spec-mcp.md](product/spec-mcp.md), **the spec wins**.
 
@@ -43,7 +43,7 @@ is connected (product D13).
 
 ### Core principles
 
-- Core logic belongs in `lattice.core`.
+- Core logic belongs in `ferumind.core`.
 - MCP, CLI, and workers must call core; they must not duplicate safety
   logic.
 - Documents carry the intelligence; the server is a librarian: it protects,
@@ -57,7 +57,7 @@ is connected (product D13).
 ## Repo Layout
 
 ```
-lattice/
+ferumind/
   AGENTS.md              ← This file — committed agent instructions
   README.md
   pyproject.toml
@@ -65,7 +65,7 @@ lattice/
   .opencode/             ← Committed OpenCode config (source of truth)
   .githooks/             ← Git hooks (pre-commit, pre-push)
   scripts/               ← Bash and Python scripts
-  src/lattice/           ← Package root
+  src/ferumind/           ← Package root
     core/                ← Domain logic (typed, tested, no framework leakage)
     mcp/                 ← MCP server
     cli/                 ← Typer CLI
@@ -107,7 +107,7 @@ lattice/
 | `scripts/verify.sh` | Full verification pipeline |
 | `uv run python scripts/sync_agent_configs.py` | Sync agent configs |
 | `uv run python scripts/bootstrap_workspace.py` | Init workspace |
-| `uv run lattice` | Run the CLI |
+| `uv run ferumind` | Run the CLI |
 | `scripts/install-hooks.sh` | Install git hooks |
 
 ## Coding Standards
@@ -197,11 +197,11 @@ lattice/
 - Tool responses must be structured; errors must be machine-readable codes.
   No silent partial success. No hard delete (`archive_document` /
   `unarchive_document` instead).
-- Tool names are stable snake_case; the server namespace is Lattice.
+- Tool names are stable snake_case; the server namespace is Ferumind.
 - The workspace format is versioned (`workspace/system/meta.yml`,
   `format: 2`; product/spec-versioning.md is the full spec). Writes against
   a mismatched format fail with `FORMAT_UNSUPPORTED`; migration is explicit
-  (`lattice migrate`), never implicit. The MCP surface itself is not
+  (`ferumind migrate`), never implicit. The MCP surface itself is not
   wire-versioned: additive within a format, breaking changes ride a format
   bump with a migrator in the same change. DB schema changes go through
   numbered migrations in `db/migrations/` (`PRAGMA user_version`) — never
@@ -232,9 +232,9 @@ indexed, **not** searchable by content, and **never** part of `get_context`.
 Two tiers serve them:
 
 - `list_files` — generic discovery. Walks the project, returns
-  project-relative paths with MIME type, size, a `lattice://` `resource_uri`,
+  project-relative paths with MIME type, size, a `ferumind://` `resource_uri`,
   and a `context_support` value (`image` / `text` / `resource_only`).
-  Markdown, Lattice upload sidecars, and `.lattice/` are excluded by default.
+  Markdown, Ferumind upload sidecars, and `.ferumind/` are excluded by default.
 - `read_file` — puts one file into model context: a bounded image rendition
   (JPEG/PNG/WebP), a bounded text slice, or metadata only. Always returns a
   `ResourceLink` to the untouched original.
@@ -309,9 +309,9 @@ nonexistent paths.
   scripts, not MCP protocol participants).
 - The actual MCP command given to tunnel-client should be a quiet executable
   wrapper, never a shell command string.
-- `scripts/lattice-mcp-stdio` is the canonical wrapper; it loads env files
+- `scripts/ferumind-mcp-stdio` is the canonical wrapper; it loads env files
   and `exec`s the server.
-- The tunnel serves the workspace configured by `LATTICE_WORKSPACE`. The MCP
+- The tunnel serves the workspace configured by `FERUMIND_WORKSPACE`. The MCP
   server does not authenticate callers, so the relay and its control-plane
   credentials are the only access control in front of that workspace. Treat
   the tunnel URL and `CONTROL_PLANE_*` values as secrets granting full read
@@ -345,7 +345,7 @@ nonexistent paths.
 - Writing outside the configured workspace/project root
 - Symlink escape
 - Unsafe path joins — never use `str(path).startswith(str(root))` for
-  containment checks; always use `is_under_root()` from `lattice.core.paths`
+  containment checks; always use `is_under_root()` from `ferumind.core.paths`
 - Hard delete for user knowledge content
 - Reintroducing session state or `session_id` parameters (removed v1 concepts)
 - Using `Any` without written justification
@@ -358,7 +358,7 @@ nonexistent paths.
 
 ## Env / Config Sync Rules
 
-- `.env`, `.env.example`, and `src/lattice/core/config.py` (or any Pydantic
+- `.env`, `.env.example`, and `src/ferumind/core/config.py` (or any Pydantic
   config module) must stay in sync.
 - When adding a new key to one, add it to all three.
 - Never overwrite existing values in `.env`. If a key already has a real
@@ -369,18 +369,18 @@ nonexistent paths.
 - When Pydantic config modules exist, the field names and defaults there are
   the source of truth for structure; `.env.example` is the source of truth
   for which variables are user-configurable.
-- Tunnel control-plane keys (`CONTROL_PLANE_*`, `LATTICE_TUNNEL_PROFILE`,
+- Tunnel control-plane keys (`CONTROL_PLANE_*`, `FERUMIND_TUNNEL_PROFILE`,
   `TUNNEL_CLIENT_BIN`) are launcher-only shell configuration. They must stay
   aligned between `.env`, `.env.example`, and the tunnel scripts, and must
   **not** be added to the application `Config` model or inherited by the MCP
-  child. `scripts/lattice-mcp-stdio` unsets that authority before `exec`.
+  child. `scripts/ferumind-mcp-stdio` unsets that authority before `exec`.
 
 ## Required Verification Before Completion
 
 1. Run `ruff format --check .` — no formatting issues
 2. Run `ruff check .` — no lint errors
 3. Run `pyright` — no type errors
-4. Run `pytest --cov=src/lattice` — all tests pass, coverage >= 80%
+4. Run `pytest --cov=src/ferumind` — all tests pass, coverage >= 80%
 5. Review diff for TODOs, stubs, `Any`, `# type: ignore`
 6. Check boundary violations (core vs interface)
 7. Check security implications of any path/file operations

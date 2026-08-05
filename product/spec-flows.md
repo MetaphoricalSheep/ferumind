@@ -1,7 +1,7 @@
 # Spec: Flows
 
 Status: locked for build · 11 Jul 2026 · the end-to-end behaviors the specs
-must add up to. Actors: **U** (user), **A** (chat agent), **S** (Lattice MCP
+must add up to. Actors: **U** (user), **A** (chat agent), **S** (Ferumind MCP
 server), **W** (mechanical worker).
 
 ## 1. Chat startup

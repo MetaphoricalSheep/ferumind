@@ -6,14 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core import reads
-from lattice.core.errors import SnapshotNotFoundError
-from lattice.core.paths import WorkspaceRoot, contained_project_root
-from lattice.core.reads import (
+from ferumind.core import reads
+from ferumind.core.errors import SnapshotNotFoundError
+from ferumind.core.paths import WorkspaceRoot, contained_project_root
+from ferumind.core.reads import (
     MAX_SNAPSHOT_TEXT_BYTES,
     read_project_snapshot,
 )
-from lattice.core.snapshots import create_snapshot, new_snapshot_id
+from ferumind.core.snapshots import create_snapshot, new_snapshot_id
 
 
 def _create_project_snapshot(

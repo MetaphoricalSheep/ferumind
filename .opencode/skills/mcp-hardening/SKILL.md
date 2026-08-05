@@ -3,7 +3,7 @@ name: mcp-hardening
 description: Use when changing MCP tools, schemas, project scoping, proposal/apply behavior, transport boundaries, or structured error handling.
 compatibility: opencode, claude-code, cursor, copilot, codex
 metadata:
-  project: lattice
+  project: ferumind
   role: mcp-security
 ---
 
@@ -53,7 +53,7 @@ metadata:
   `policy_note`; the server informs, agents honor. Hard refusals are the
   closed list: `DOCUMENT_ARCHIVED`, `FRONTMATTER_PROTECTED`,
   `WORKSPACE_MISMATCH`.
-- Errors are machine-readable codes returned through `LatticeToolEnvelope`:
+- Errors are machine-readable codes returned through `FerumindToolEnvelope`:
   `SECTION_NOT_FOUND`, `RANGE_NOT_FOUND`, `RANGE_TOO_LARGE`, `MATCH_NOT_FOUND`,
   `AMBIGUOUS_MATCH`, `INVALID_REGEX`, `FRONTMATTER_PROTECTED`,
   `FRONTMATTER_REQUIRED`, `PATCH_CONFLICT`, `DOCUMENT_HASH_MISMATCH`,
@@ -61,4 +61,4 @@ metadata:
   `PROJECT_NOT_FOUND`, `PATCH_EXPIRED`, `DOCUMENT_ARCHIVED`,
   `UNKNOWN_FOLDER`, `CANNOT_ARCHIVE_SPINE`, `PATH_EXISTS`.
 - Tool names stay snake_case (never dotted); every tool exposes `outputSchema`
-  and returns `LatticeToolResult`.
+  and returns `FerumindToolResult`.

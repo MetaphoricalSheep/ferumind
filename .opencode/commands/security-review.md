@@ -9,7 +9,7 @@ Before completing any task that touches path handling, file writes, project scop
 ## Security review checklist
 
 - Did this change touch path handling, file writes, project scoping, snapshots, MCP tools, config loading, or workspace access?
-- Are all filesystem operations routed through `lattice.core` safety helpers?
+- Are all filesystem operations routed through `ferumind.core` safety helpers?
 - Are all user-provided paths treated as untrusted?
 - Are absolute paths rejected where relative paths are expected?
 - Are `..` traversal attempts rejected?

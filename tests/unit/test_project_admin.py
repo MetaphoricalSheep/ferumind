@@ -6,12 +6,12 @@ import sqlite3
 
 import pytest
 
-from lattice.core.errors import ProjectNotFoundError, ValidationError
-from lattice.core.indexer import rebuild_index
-from lattice.core.operations import WORKSPACE_OPERATION_PROJECT, record_operation
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.project_admin import delete_project, list_all_projects
-from lattice.core.registry import load_registry
+from ferumind.core.errors import ProjectNotFoundError, ValidationError
+from ferumind.core.indexer import rebuild_index
+from ferumind.core.operations import WORKSPACE_OPERATION_PROJECT, record_operation
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.project_admin import delete_project, list_all_projects
+from ferumind.core.registry import load_registry
 
 
 def test_list_all_projects_reports_registered_project(
@@ -36,7 +36,7 @@ def test_list_all_projects_surfaces_orphaned_folder_and_db_rows(
 
     # Simulate the user's scenario: the registry entry is gone (or was
     # never there) but the folder and/or DB rows linger.
-    from lattice.core.registry import remove_registry_entry
+    from ferumind.core.registry import remove_registry_entry
 
     remove_registry_entry(workspace, project)
 

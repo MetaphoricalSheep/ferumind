@@ -2,8 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core.paths import PathSafetyError
-from lattice.core.security import (
+from ferumind.core.paths import PathSafetyError
+from ferumind.core.security import (
     allowed_extension,
     assert_not_symlink,
     validate_path_safety,

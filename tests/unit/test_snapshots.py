@@ -7,9 +7,9 @@ from pathlib import Path
 
 import pytest
 
-from lattice.core import file_io as file_io_module
-from lattice.core import snapshots as snapshots_module
-from lattice.core.snapshots import (
+from ferumind.core import file_io as file_io_module
+from ferumind.core import snapshots as snapshots_module
+from ferumind.core.snapshots import (
     MAX_SNAPSHOT_METADATA_BYTES,
     create_global_snapshot,
     create_snapshot,
@@ -91,7 +91,7 @@ def test_failed_snapshot_construction_removes_partial_user_content(
             snapshot_id=new_snapshot_id(),
         )
 
-    snapshots_dir = tmp_path / ".lattice" / "snapshots"
+    snapshots_dir = tmp_path / ".ferumind" / "snapshots"
     assert snapshots_dir.is_dir()
     assert list(snapshots_dir.iterdir()) == []
 

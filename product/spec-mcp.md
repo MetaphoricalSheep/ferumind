@@ -1,7 +1,7 @@
 # Spec: MCP Server v2
 
 Status: locked for build · 11 Jul 2026 · implements
-[00-what-is-lattice.md](00-what-is-lattice.md) D3, D7, D8, D9, D11, D12, D13.
+[00-what-is-ferumind.md](00-what-is-ferumind.md) D3, D7, D8, D9, D11, D12, D13.
 Written to be buildable by a coding agent without further product decisions.
 
 This is a **fresh surface**. No compatibility shims with the session-based v1
@@ -11,7 +11,7 @@ separate later effort (00 §Open).
 ## 0. Transport, protocol, statelessness
 
 - Server framework: current FastMCP/MCP SDK stack, local stdio transport,
-  launched by `scripts/lattice-mcp-stdio`. Direct network transports fail
+  launched by `scripts/ferumind-mcp-stdio`. Direct network transports fail
   closed. The tunnel integration may serve a live workspace for an owner
   running it themselves; the OAuth, owner-authorization, and deployment gate
   in D11 still governs supported remote serving beyond that case.
@@ -162,7 +162,7 @@ success). Existing parameter names are **kept verbatim** (`path`,
 | Tool | Params | Returns | Notes |
 |---|---|---|---|
 | `get_context` | `project` | §4 | |
-| `get_compact_instructions` | — | compacting procedure | explicit `/compact` or Lattice compact trigger only |
+| `get_compact_instructions` | — | compacting procedure | explicit `/compact` or Ferumind compact trigger only |
 | `read_document` | `project, path` | content, frontmatter, `document_sha256` | serves every folder incl. rules/memory/archive |
 | `read_document_range` | `project, path, start_line, end_line` | lines + hashes | unchanged |
 | `get_document_map` | `project, path` | section map + hashes | unchanged |
@@ -335,7 +335,7 @@ Two independent mitigations, both added here:
 | Tool | Params | Behavior |
 |---|---|---|
 | `start_library_file_upload` | `project, filename, total_size, total_chunks, folder_path="library", mime_type?, metadata?, expected_sha256?` | Declares a pending upload; returns an unguessable `upload_id` (reuses the patch-proposal `operation_id` generator and 24h TTL/pending state machine, `operation_type="upload_session"`) |
-| `append_upload_chunk` | `project, upload_id, chunk_index, chunk_base64` | Stages one chunk (capped at `MAX_CHUNK_BYTES`, 256 KB decoded — shared with `upload_library_file`'s single-call cap) to `projects/<key>/.lattice/uploads/<upload_id>/chunks/`; idempotent per index — a resend overwrites, never duplicates |
+| `append_upload_chunk` | `project, upload_id, chunk_index, chunk_base64` | Stages one chunk (capped at `MAX_CHUNK_BYTES`, 256 KB decoded — shared with `upload_library_file`'s single-call cap) to `projects/<key>/.ferumind/uploads/<upload_id>/chunks/`; idempotent per index — a resend overwrites, never duplicates |
 | `finalize_library_file_upload` | `project, upload_id` | Verifies every chunk 0..total_chunks-1 present (`UPLOAD_INCOMPLETE` otherwise), assembles them, checks the assembled size against the declared `total_size`, verifies `expected_sha256` if supplied (`CONTENT_HASH_MISMATCH` otherwise), then runs the *same* write path as `upload_library_file` (§5.3a) — identical result shape, extension denylist, fail-closed collision; snapshot row, upload oplog, and terminal session state commit atomically |
 | `discard_upload` | `project, upload_id` | Abandons a pending session and deletes its staged chunks; nothing was ever written to `library/` |
 
@@ -361,7 +361,7 @@ Rationale:
   `expires_at` TTL, and project-scoped lookup (`OPERATION_NOT_FOUND`,
   `PATCH_PROJECT_MISMATCH` on a cross-project `upload_id`) as a patch
   proposal — no migration needed. Chunk bytes themselves never enter the
-  DB; they live only as files under `.lattice/uploads/`.
+  DB; they live only as files under `.ferumind/uploads/`.
 - **Abandoned staging is bounded and opportunistically swept.** A project
   may reserve at most 32 pending upload sessions and 256 MB of declared
   upload bytes at once. Expired staging is removed when that session is
@@ -401,7 +401,7 @@ that.** `upload_library_file`/`append_upload_chunk` remain the portable
 upload path for every MCP client, including ChatGPT if it prefers them.
 `openai/fileParams` is an OpenAI-specific, optional host extension — a
 host that doesn't understand it simply won't populate `files` with
-resolved references, and core Lattice behavior never depends on any host
+resolved references, and core Ferumind behavior never depends on any host
 understanding it.
 
 | Tool | Params | Behavior |
@@ -636,7 +636,7 @@ Two tiers, deliberately separate:
 | Tier | Surface | Question it answers |
 |---|---|---|
 | 1 | `list_files`, `read_file` | "What is here, and what can the model actually look at?" |
-| 2 | `resources/read` on a `lattice://` URI | "Give me the original, exactly as stored." |
+| 2 | `resources/read` on a `ferumind://` URI | "Give me the original, exactly as stored." |
 
 | Tool | Params | Behavior |
 |---|---|---|
@@ -685,14 +685,14 @@ server, which D13 forbids.
 - **GIF and SVG stay `resource_only`.** A GIF's first frame is not the
   animation, and presenting it as "the image" would misrepresent the file.
   Rasterizing SVG would mean executing untrusted markup in a rendering
-  stack Lattice does not ship. Both remain retrievable in full via Tier 2.
+  stack Ferumind does not ship. Both remain retrievable in full via Tier 2.
 - **Text (`text`).** UTF-8-decodable types are returned as a bounded slice
   with `text_offset`/`max_text_chars` paging, reporting `truncated`,
   `total_chars`, and the `next_offset`. Slicing happens on the decoded
   string, so a window boundary can never split a codepoint. A file whose
   MIME claims text but whose bytes are not valid UTF-8 degrades to
   `resource_only` with `reason: not_valid_utf8` rather than being decoded
-  lossily. A type Lattice does not recognize is never speculatively
+  lossily. A type Ferumind does not recognize is never speculatively
   decoded as text.
 - **Everything else (`resource_only`).** PDFs, Office documents, archives,
   and video return metadata and the resource link, and the summary text
@@ -703,7 +703,7 @@ server, which D13 forbids.
 
 **Rich results.** `read_file` is the one tool whose content blocks are not
 a single serialized envelope. Image bytes must reach the host as a genuine
-`ImageContent` or the host renders base64 as text. The Lattice envelope
+`ImageContent` or the host renders base64 as text. The Ferumind envelope
 still travels in `structuredContent`, so error codes and machine-readable
 fields are unchanged. Encoded payloads live **only** in their typed block —
 never in the envelope, a text block, or `_meta`.
@@ -711,7 +711,7 @@ never in the envelope, a text block, or `_meta`.
 **Resource URIs (Tier 2).**
 
 ```
-lattice://file/<project-key>/<base64url-unpadded(project-relative path)>
+ferumind://file/<project-key>/<base64url-unpadded(project-relative path)>
 ```
 
 - One shared helper builds and parses these, so a URI minted by `list_files`
@@ -740,12 +740,12 @@ not a discovery channel. `list_files` is, with filters and pagination.
 **SDK note.** The read handler is registered at the low level rather than
 through FastMCP's `@resource` decorator, because a FastMCP
 `ResourceTemplate` carries a single fixed `mime_type` for every resource it
-creates — it could only ever label a JPEG and a PDF identically. Non-Lattice
+creates — it could only ever label a JPEG and a PDF identically. Non-Ferumind
 URIs fall through to FastMCP so nothing else is affected.
 
 **Size cap.** `MAX_RESOURCE_READ_BYTES` is defined once
 (`core/file_reads.py`) and starts equal to `MAX_UPLOAD_BYTES` (20 MB):
-refusing to serve back a file Lattice itself accepted would be incoherent.
+refusing to serve back a file Ferumind itself accepted would be incoherent.
 Over the cap fails explicitly with `FILE_TOO_LARGE` carrying the actual
 size and the current limit — binaries are never truncated, and a partial
 binary is never presented as the original. Text context reads have a
@@ -760,7 +760,7 @@ Both are one-line changes once real host compatibility numbers exist.
   host-specific integration. Tier 1 + Tier 2 are portable MCP; a host
   extension would be additive on top. The inbound ChatGPT
   `openai/fileParams` upload path (§5.3c) is unaffected — it moves files
-  *into* Lattice, this section moves them *out*.
+  *into* Ferumind, this section moves them *out*.
 
 Total surface with the file tools: **17 read + 12 propose/discard + 17
 mutate = 46 tools**.
@@ -866,9 +866,9 @@ an agent that gets `FILE_NOT_FOUND` should re-run `list_files`, not
 an image over the decodable-pixel ceiling — `details` carries
 `size_bytes`/`limit_bytes` (or `max_pixels`) so the caller can tell which.
 `VALIDATION_ERROR` covers an undecodable image, a directory or special
-file, and a malformed or non-canonical `lattice://` URI.
+file, and a malformed or non-canonical `ferumind://` URI.
 
-**Errors on `resources/read` have no Lattice envelope.** The MCP resource
+**Errors on `resources/read` have no Ferumind envelope.** The MCP resource
 protocol carries only a JSON-RPC error, so the machine-readable code rides
 in that error's structured `data` as `error_code`, alongside the same
 `details` fields the tool envelope would have carried.
@@ -914,10 +914,10 @@ in that error's structured `data` as `error_code`, alongside the same
 
 Exact string:
 
-> Lattice is the user's shared Markdown workspace and the source of truth
-> across chats. If the user explicitly invokes `/compact`, `@lattice
-> /compact`, or asks for a Lattice compact, call `get_compact_instructions`.
-> If the user invokes `/resume <token>` or asks to resume a Lattice compact,
+> Ferumind is the user's shared Markdown workspace and the source of truth
+> across chats. If the user explicitly invokes `/compact`, `@ferumind
+> /compact`, or asks for a Ferumind compact, call `get_compact_instructions`.
+> If the user invokes `/resume <token>` or asks to resume a Ferumind compact,
 > call `resume_compact`. For project work, call `get_context` with your
 > project key before anything else, and obey the rules it returns. Never use
 > compacts for ordinary project memory, notes, summaries, or document
@@ -953,7 +953,7 @@ prevent.
    id, and history; archived docs vanish from `get_context.documents` and
    default search.
 5. No tool result ever contains a session id; grep-level check that
-   `session_id` is gone from `src/lattice/mcp/`.
+   `session_id` is gone from `src/ferumind/mcp/`.
 6. Observation log rows for `get_context` carry the three payload metrics.
 7. All path handling passes the existing adversarial path/symlink test
    suite under the new layout.

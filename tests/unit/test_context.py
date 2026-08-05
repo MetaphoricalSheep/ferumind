@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import sqlite3
 
-from lattice.core.context import build_context
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.registry import require_project
-from lattice.core.writes import archive_document, capture_note, create_document
+from ferumind.core.context import build_context
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.registry import require_project
+from ferumind.core.writes import archive_document, capture_note, create_document
 
 
 def _context(conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str):
@@ -20,12 +20,13 @@ def test_rules_concatenate_workspace_then_project_with_headers(
 ) -> None:
     context = _context(conn, workspace, project)
     sources = context.rules.sources
-    assert sources[:3] == [
+    assert sources[:4] == [
         "system/rules/00-contract.md",
         "system/rules/10-editing.md",
         "system/rules/20-memory.md",
+        "system/rules/30-reminders.md",
     ]
-    assert sources[3] == f"projects/{project}/rules/00-project.md"
+    assert sources[4] == f"projects/{project}/rules/00-project.md"
     # Each file is prefixed by an H2 header naming its source path.
     for source in sources:
         assert f"## {source}" in context.rules.content_markdown

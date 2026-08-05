@@ -16,10 +16,10 @@ from pathlib import Path
 import pytest
 
 SECURITY_SENSITIVE_MODULES: list[str] = [
-    "src/lattice/core/paths.py",
-    "src/lattice/core/security.py",
-    "src/lattice/core/projects.py",
-    "src/lattice/mcp/",
+    "src/ferumind/core/paths.py",
+    "src/ferumind/core/security.py",
+    "src/ferumind/core/projects.py",
+    "src/ferumind/mcp/",
 ]
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -31,7 +31,7 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 #   - reason: why this usage is safe
 ALLOWLIST: list[dict[str, str]] = [
     {
-        "file": "src/lattice/mcp/read_tools.py",
+        "file": "src/ferumind/mcp/read_tools.py",
         "line": "if rel_str.startswith(excluded):",
         "reason": (
             "Excluded dir prefix check on a project-relative path (produced by"
@@ -39,18 +39,18 @@ ALLOWLIST: list[dict[str, str]] = [
         ),
     },
     {
-        "file": "src/lattice/mcp/read_tools.py",
-        "line": 'if any(part.startswith(".") and part != ".lattice" for part in parts):',
+        "file": "src/ferumind/mcp/read_tools.py",
+        "line": 'if any(part.startswith(".") and part != ".ferumind" for part in parts):',
         "reason": (
             "Hidden file detection (dot-prefix check on path components),"
             " NOT a path containment check. Safe."
         ),
     },
     {
-        "file": "src/lattice/mcp/resources.py",
+        "file": "src/ferumind/mcp/resources.py",
         "line": "if not uri_text.startswith(FILE_URI_PREFIX):",
         "reason": (
-            "URI scheme dispatch on 'lattice://file/', NOT a path containment"
+            "URI scheme dispatch on 'ferumind://file/', NOT a path containment"
             " check. Decides whether this handler owns the URI or delegates to"
             " FastMCP. The encoded path inside is decoded by parse_file_uri and"
             " then resolved through contained_path, which is where containment"
@@ -127,7 +127,7 @@ def test_no_unsafe_path_prefix_checks() -> None:
 
     String-prefix checks produce false positives with sibling paths
     (e.g. ``/tmp/repo-evil`` passes a ``.startswith("/tmp/repo")`` check).
-    Use ``is_under_root()`` from ``lattice.core.paths`` instead.
+    Use ``is_under_root()`` from ``ferumind.core.paths`` instead.
     """
     violations: list[str] = []
 
@@ -144,7 +144,7 @@ def test_no_unsafe_path_prefix_checks() -> None:
             "String-prefix path containment checks are forbidden — they produce\n"
             "false positives with sibling-prefix paths (e.g. /tmp/repo-evil\n"
             "incorrectly passes a .startswith('/tmp/repo') check).\n\n"
-            "Use is_under_root() from lattice.core.paths instead.\n\n"
+            "Use is_under_root() from ferumind.core.paths instead.\n\n"
             "If the usage is legitimate and NOT a path containment check, add an\n"
             "entry to ALLOWLIST in this test file with an explanation.\n\n"
             "Violations:\n" + "\n".join(violations)

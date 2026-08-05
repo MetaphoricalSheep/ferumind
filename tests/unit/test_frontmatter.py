@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import pytest
 
-from lattice.core.errors import FrontmatterInvalidError
-from lattice.core.frontmatter import (
+from ferumind.core.errors import FrontmatterInvalidError
+from ferumind.core.frontmatter import (
     PROTECTED_FRONTMATTER_KEYS,
     extract_frontmatter_block,
     generate_frontmatter,

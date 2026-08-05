@@ -34,9 +34,9 @@ SDIST_REQUIRED = frozenset(
 )
 WHEEL_REQUIRED = frozenset(
     {
-        "lattice/__init__.py",
-        "lattice/py.typed",
-        "lattice/db/schema.sql",
+        "ferumind/__init__.py",
+        "ferumind/py.typed",
+        "ferumind/db/schema.sql",
     }
 )
 
@@ -82,14 +82,14 @@ def _inspect_wheel(wheel: Path) -> tuple[str, ...]:
         missing = sorted(path for path in WHEEL_REQUIRED if path not in names)
         violations.extend(f"{wheel}: missing required entry {path}" for path in missing)
 
-        for source in sorted((REPO_ROOT / "src" / "lattice").rglob("*.py")):
+        for source in sorted((REPO_ROOT / "src" / "ferumind").rglob("*.py")):
             relative = source.relative_to(REPO_ROOT / "src").as_posix()
             if relative not in names:
                 violations.append(f"{wheel}: missing runtime source {relative}")
                 continue
             if archive.read(relative) != source.read_bytes():
                 violations.append(f"{wheel}: stale runtime source {relative}")
-        for relative in ("lattice/py.typed", "lattice/db/schema.sql"):
+        for relative in ("ferumind/py.typed", "ferumind/db/schema.sql"):
             source = REPO_ROOT / "src" / relative
             if relative in names and archive.read(relative) != source.read_bytes():
                 violations.append(f"{wheel}: stale runtime data {relative}")

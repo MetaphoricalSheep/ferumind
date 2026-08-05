@@ -32,11 +32,11 @@ load_env_file() {
 }
 
 load_env_file "${REPO_ROOT}/.env"
-load_env_file "/etc/lattice-tunnel.env"
-load_env_file "/etc/lattice-mcp.env"
+load_env_file "/etc/ferumind-tunnel.env"
+load_env_file "/etc/ferumind-mcp.env"
 
-PROFILE="${LATTICE_TUNNEL_PROFILE:-lattice}"
-MCP_COMMAND="${SCRIPT_DIR}/lattice-mcp-stdio"
+PROFILE="${FERUMIND_TUNNEL_PROFILE:-ferumind}"
+MCP_COMMAND="${SCRIPT_DIR}/ferumind-mcp-stdio"
 TUNNEL_CLIENT="${TUNNEL_CLIENT_BIN:-tunnel-client}"
 PROFILE_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/tunnel-client"
 PROFILE_FILE="${PROFILE_DIR}/${PROFILE}.yaml"
@@ -44,7 +44,7 @@ PID_FILE="${PROFILE_DIR}/${PROFILE}.pid"
 LOG_FILE="${PROFILE_DIR}/${PROFILE}.log"
 
 if [[ ! "$PROFILE" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$ ]]; then
-  echo "Invalid LATTICE_TUNNEL_PROFILE; use 1-64 letters, digits, '.', '_' or '-'." >&2
+  echo "Invalid FERUMIND_TUNNEL_PROFILE; use 1-64 letters, digits, '.', '_' or '-'." >&2
   exit 1
 fi
 
@@ -77,7 +77,7 @@ Usage: $(basename "$0") [--init | --force | --bg | --stop | --doctor | --help]
   --doctor   Validate the profile only.
   --help     Show this help.
 
-The tunnel serves the workspace configured by LATTICE_WORKSPACE. The relay is
+The tunnel serves the workspace configured by FERUMIND_WORKSPACE. The relay is
 the only thing standing between a caller and that workspace; the MCP server
 itself does not authenticate.
 

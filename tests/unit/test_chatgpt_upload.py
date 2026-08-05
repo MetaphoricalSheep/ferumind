@@ -2,7 +2,7 @@
 ChatGPT's openai/fileParams file references, with per-file partial-success semantics.
 
 The actual SSRF-hardened HTTP fetch is exercised in test_remote_fetch.py;
-these tests monkeypatch lattice.core.writes.fetch_remote_file so batch
+these tests monkeypatch ferumind.core.writes.fetch_remote_file so batch
 orchestration (per-file error isolation, filename/mime handling, dedup
 non-claim) can be tested without any network layer at all.
 """
@@ -19,17 +19,17 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from lattice.core import writes
-from lattice.core.errors import (
+from ferumind.core import writes
+from ferumind.core.errors import (
     DocumentExistsError,
     DownloadFailedError,
     UnknownFolderError,
     UnsupportedFileTypeError,
     ValidationError,
 )
-from lattice.core.paths import WorkspaceRoot
-from lattice.core.writes import ChatGPTFileInput, upload_library_files_from_chatgpt
-from lattice.db.database import Database
+from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.writes import ChatGPTFileInput, upload_library_files_from_chatgpt
+from ferumind.db.database import Database
 
 
 def _read_bytes(workspace: WorkspaceRoot, project: str, rel: str) -> bytes:
@@ -192,7 +192,7 @@ class TestChatGPTBatchUpload:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         clock = iter([100.0, 161.0])
-        monkeypatch.setattr("lattice.core.writes.time.monotonic", lambda: next(clock))
+        monkeypatch.setattr("ferumind.core.writes.time.monotonic", lambda: next(clock))
 
         def never_fetch(_url: str, **_kwargs: object) -> bytes:
             pytest.fail("expired aggregate budget must be checked before fetching")

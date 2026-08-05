@@ -1,4 +1,4 @@
-"""Shared pytest fixtures for Lattice tests.
+"""Shared pytest fixtures for Ferumind tests.
 
 Every fixture builds on ``tmp_path``: a bootstrapped v2 workspace (contract
 files installed, ``format: 2`` marker), a schema-initialized database, and a
@@ -24,8 +24,8 @@ sys.path.insert(0, str(REPO_ROOT / "scripts"))
 
 from bootstrap_workspace import bootstrap  # noqa: E402
 
-from lattice.core.paths import WorkspaceRoot  # noqa: E402
-from lattice.db.database import Database  # noqa: E402
+from ferumind.core.paths import WorkspaceRoot  # noqa: E402
+from ferumind.db.database import Database  # noqa: E402
 
 
 @pytest.fixture
@@ -38,7 +38,7 @@ def workspace(tmp_path: Path) -> WorkspaceRoot:
 
 @pytest.fixture
 def database(workspace: WorkspaceRoot) -> Database:
-    db = Database(workspace / ".lattice" / "lattice.sqlite")
+    db = Database(workspace / ".ferumind" / "ferumind.sqlite")
     db.init_schema()
     return db
 
@@ -53,7 +53,7 @@ def conn(database: Database) -> Iterator[sqlite3.Connection]:
 @pytest.fixture
 def project(conn: sqlite3.Connection, workspace: WorkspaceRoot) -> str:
     """A created project ('demo') with seeded spine and rules."""
-    from lattice.core.writes import create_project
+    from ferumind.core.writes import create_project
 
     create_project(conn, workspace, key="demo", title="Demo")
     return "demo"
