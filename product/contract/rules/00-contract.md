@@ -14,11 +14,6 @@ call). Never name any other project. The hard rules, always:
 2. Nothing is hard-deleted: retire documents with `archive_document`.
 3. Memory never leaks into shared documents (see the memory rules).
 
-Workspace-level compacts are the exception to project scope, and only when
-the user explicitly invokes `/compact`, `@ferumind /compact`, or names a
-Ferumind compact. They live in `workspace/compacts/`, outside every project,
-and are for chat handoffs rather than project memory.
-
 ## Folders are roles
 
 - `spine.md` — the entry page: orientation, precedence, the map. If any

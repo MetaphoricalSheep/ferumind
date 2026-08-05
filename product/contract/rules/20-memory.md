@@ -2,8 +2,8 @@
 
 `memory/` is where you keep continuity between chats: durable observations,
 known mistakes, user preferences, project state that isn't obvious from the
-shared documents. It is shared by all agents on the project and readable by
-the user — write nothing you wouldn't show them.
+shared documents. This is your space. You are free to utilize it and write
+whatever you want here.
 
 - **Write memory when it earns its keep**: a correction you'd otherwise
   repeat, a decision's *why*, a preference the user stated once. Not a diary
