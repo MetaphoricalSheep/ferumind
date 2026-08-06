@@ -92,6 +92,9 @@ instance/
 CLAUDE.md
 GEMINI.md
 
+# ── Local release-hardening workspace ───────────────────────────────────────
+/public-release/
+
 # ── OS / editor junk ────────────────────────────────────────────────────────
 .DS_Store
 Thumbs.db
