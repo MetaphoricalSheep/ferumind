@@ -42,9 +42,24 @@ jobs:
       - name: Verify
         run: scripts/verify.sh
 
-      - name: Audit Python environment
+      - name: Export locked Python dependencies
         if: matrix.python-version == '3.12'
-        run: uv run pip-audit --strict --progress-spinner=off
+        run: |
+          uv export \
+            --quiet \
+            --frozen \
+            --all-extras \
+            --no-emit-project \
+            --output-file "$RUNNER_TEMP/ferumind-audit-requirements.txt"
+
+      - name: Audit locked Python dependencies
+        if: matrix.python-version == '3.12'
+        run: |
+          uv run pip-audit \
+            --strict \
+            --require-hashes \
+            --requirement "$RUNNER_TEMP/ferumind-audit-requirements.txt" \
+            --progress-spinner=off
 
       - name: Audit OpenCode dependencies
         if: matrix.python-version == '3.12'
