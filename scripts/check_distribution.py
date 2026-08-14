@@ -35,10 +35,22 @@ SDIST_REQUIRED = frozenset(
 WHEEL_REQUIRED = frozenset(
     {
         "ferumind/__init__.py",
-        "ferumind/py.typed",
+        "ferumind/dashboard/static/basecoat/README.md",
+        "ferumind/dashboard/static/basecoat/REVISION",
+        "ferumind/dashboard/static/basecoat/base.css",
+        "ferumind/dashboard/static/basecoat/components.css",
+        "ferumind/dashboard/static/basecoat/tokens.css",
+        "ferumind/dashboard/static/dashboard.css",
+        "ferumind/dashboard/static/dashboard.js",
+        "ferumind/dashboard/static/index.html",
+        "ferumind/db/migrations/0001_index_observation_correlation_id.sql",
+        "ferumind/db/migrations/0002_section_index.sql",
         "ferumind/db/schema.sql",
+        "ferumind/py.typed",
     }
 )
+
+RUNTIME_DATA = tuple(sorted(WHEEL_REQUIRED - {"ferumind/__init__.py"}))
 
 
 def _safe_archive_name(name: str) -> bool:
@@ -89,7 +101,7 @@ def _inspect_wheel(wheel: Path) -> tuple[str, ...]:
                 continue
             if archive.read(relative) != source.read_bytes():
                 violations.append(f"{wheel}: stale runtime source {relative}")
-        for relative in ("ferumind/py.typed", "ferumind/db/schema.sql"):
+        for relative in RUNTIME_DATA:
             source = REPO_ROOT / "src" / relative
             if relative in names and archive.read(relative) != source.read_bytes():
                 violations.append(f"{wheel}: stale runtime data {relative}")

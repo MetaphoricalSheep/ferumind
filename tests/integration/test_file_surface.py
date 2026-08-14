@@ -17,9 +17,8 @@ from typing import Any, cast
 
 import anyio
 import pytest
-from mcp import ClientSession
-from mcp.shared.exceptions import McpError
-from mcp.shared.memory import create_connected_server_and_client_session
+from mcp.client.client import Client
+from mcp.shared.exceptions import MCPError
 from mcp.types import (
     BlobResourceContents,
     CallToolResult,
@@ -42,7 +41,7 @@ PROJECT = "demo"
 @pytest.fixture
 def project_files(workspace: WorkspaceRoot, large_photo_bytes: bytes) -> dict[str, Path]:
     """A project holding the file shapes this surface has to handle."""
-    from ferumind.core.writes import create_project
+    from ferumind.core.project_writes import create_project
     from ferumind.db.database import Database
 
     db = Database(workspace / ".ferumind" / "ferumind.sqlite")
@@ -80,16 +79,17 @@ def project_files(workspace: WorkspaceRoot, large_photo_bytes: bytes) -> dict[st
 
 
 @asynccontextmanager
-async def _client(workspace: WorkspaceRoot) -> AsyncGenerator[ClientSession]:
+async def _client(workspace: WorkspaceRoot) -> AsyncGenerator[Client]:
     from ferumind.mcp import server, tool_context
 
     tool_context.reset_tool_context()
     tool_context.init_tool_context(Path(workspace))
     server.register_all_tools()
-    lowlevel = server.mcp._mcp_server  # pyright: ignore[reportPrivateUsage]
     try:
-        async with create_connected_server_and_client_session(lowlevel) as session:
-            await session.initialize()
+        # mcp 2.x: one Client object takes the server directly and negotiates
+        # on entry. This replaces the removed
+        # ``create_connected_server_and_client_session`` helper.
+        async with Client(server.mcp) as session:
             yield session
     finally:
         tool_context.reset_tool_context()
@@ -110,9 +110,9 @@ def run_session(workspace: WorkspaceRoot) -> Callable[[Any], Any]:
 
 
 def envelope(result: CallToolResult) -> dict[str, Any]:
-    structured = result.structuredContent
+    structured = result.structured_content
     assert isinstance(structured, dict)
-    return structured
+    return cast("dict[str, Any]", structured)
 
 
 def data_of(result: CallToolResult) -> dict[str, Any]:
@@ -129,10 +129,10 @@ def resource_error(run_session: Callable[[Any], Any], uri: str) -> ErrorData:
     hide the ``ErrorData`` these tests are actually about.
     """
 
-    async def body(session: ClientSession) -> ErrorData:
+    async def body(session: Client) -> ErrorData:
         try:
             await session.read_resource(cast("Any", uri))
-        except McpError as exc:
+        except MCPError as exc:
             return exc.error
         raise AssertionError(f"expected {uri} to be rejected")
 
@@ -141,16 +141,18 @@ def resource_error(run_session: Callable[[Any], Any], uri: str) -> ErrorData:
 
 class TestProtocolSurface:
     def test_resource_capability_is_advertised(self, run_session: Callable[[Any], Any]) -> None:
-        async def body(session: ClientSession) -> Any:
-            return await session.initialize()
+        async def body(session: Client) -> Any:
+            # mcp 2.x negotiates on connect; capabilities are read off the
+            # client rather than returned by an explicit initialize() call.
+            return session.server_capabilities
 
-        result = run_session(body)
-        assert result.capabilities.resources is not None
+        capabilities = run_session(body)
+        assert capabilities.resources is not None
 
     def test_tools_are_advertised_with_schemas_and_teaching_descriptions(
         self, run_session: Callable[[Any], Any]
     ) -> None:
-        async def body(session: ClientSession) -> Any:
+        async def body(session: Client) -> Any:
             return await session.list_tools()
 
         listed = run_session(body)
@@ -163,7 +165,7 @@ class TestProtocolSurface:
             assert existing in by_name
 
         list_files = by_name["list_files"]
-        assert set(list_files.inputSchema["properties"]) == {
+        assert set(list_files.input_schema["properties"]) == {
             "project",
             "path_prefix",
             "query",
@@ -174,12 +176,12 @@ class TestProtocolSurface:
             "limit",
             "cursor",
         }
-        assert list_files.inputSchema["required"] == ["project"]
+        assert list_files.input_schema["required"] == ["project"]
         assert list_files.annotations is not None
-        assert list_files.annotations.readOnlyHint is True
+        assert list_files.annotations.read_only_hint is True
 
         read_file = by_name["read_file"]
-        assert set(read_file.inputSchema["properties"]) == {
+        assert set(read_file.input_schema["properties"]) == {
             "project",
             "path",
             "max_image_edge",
@@ -188,7 +190,7 @@ class TestProtocolSurface:
             "max_text_chars",
         }
         assert read_file.annotations is not None
-        assert read_file.annotations.readOnlyHint is True
+        assert read_file.annotations.read_only_hint is True
 
         # The descriptions have to teach the workflow and the honest limits.
         assert "read_file" in (list_files.description or "")
@@ -200,14 +202,14 @@ class TestProtocolSurface:
     def test_resource_template_is_advertised_but_resources_are_not_enumerated(
         self, run_session: Callable[[Any], Any]
     ) -> None:
-        async def body(session: ClientSession) -> Any:
+        async def body(session: Client) -> Any:
             return (
                 await session.list_resource_templates(),
                 await session.list_resources(),
             )
 
         templates, resources = run_session(body)
-        uris = [template.uriTemplate for template in templates.resourceTemplates]
+        uris = [template.uri_template for template in templates.resource_templates]
         assert "ferumind://file/{project}/{encoded_path}" in uris
         # A project can hold thousands of files; discovery is list_files.
         assert resources.resources == []
@@ -216,7 +218,7 @@ class TestProtocolSurface:
 class TestListFilesOverProtocol:
     @pytest.mark.usefixtures("project_files")
     def test_discovers_arbitrary_nested_files(self, run_session: Callable[[Any], Any]) -> None:
-        async def body(session: ClientSession) -> CallToolResult:
+        async def body(session: Client) -> CallToolResult:
             return await session.call_tool("list_files", {"project": PROJECT})
 
         data = data_of(run_session(body))
@@ -237,14 +239,14 @@ class TestListFilesOverProtocol:
     def test_no_absolute_path_appears_anywhere_in_the_response(
         self, run_session: Callable[[Any], Any], workspace: WorkspaceRoot
     ) -> None:
-        async def body(session: ClientSession) -> CallToolResult:
+        async def body(session: Client) -> CallToolResult:
             return await session.call_tool("list_files", {"project": PROJECT})
 
         serialized = run_session(body).model_dump_json()
         assert str(workspace) not in serialized
 
     def test_unknown_project_is_rejected(self, run_session: Callable[[Any], Any]) -> None:
-        async def body(session: ClientSession) -> CallToolResult:
+        async def body(session: Client) -> CallToolResult:
             return await session.call_tool("list_files", {"project": "no-such-project"})
 
         env = envelope(run_session(body))
@@ -255,9 +257,9 @@ class TestListFilesOverProtocol:
     def test_filters_and_pagination_travel_over_the_wire(
         self, run_session: Callable[[Any], Any]
     ) -> None:
-        async def body(session: ClientSession) -> tuple[CallToolResult, CallToolResult]:
+        async def body(session: Client) -> tuple[CallToolResult, CallToolResult]:
             first = await session.call_tool("list_files", {"project": PROJECT, "limit": 2})
-            structured = cast("dict[str, Any]", first.structuredContent)
+            structured = cast("dict[str, Any]", first.structured_content)
             cursor = structured["data"]["next_cursor"]
             second = await session.call_tool(
                 "list_files", {"project": PROJECT, "limit": 2, "cursor": cursor}
@@ -281,7 +283,7 @@ class TestReadFileOverProtocol:
         original = project_files["photo"].read_bytes()
         assert len(original) > 4_000_000
 
-        async def body(session: ClientSession) -> CallToolResult:
+        async def body(session: Client) -> CallToolResult:
             return await session.call_tool(
                 "read_file",
                 {"project": PROJECT, "path": "library/trip photos/café föto.jpg"},
@@ -293,7 +295,7 @@ class TestReadFileOverProtocol:
 
         image = result.content[1]
         assert isinstance(image, ImageContent)
-        assert image.mimeType == "image/jpeg"
+        assert image.mime_type == "image/jpeg"
         rendition_bytes = base64.b64decode(image.data)
         # A ~5 MB original must not travel inline as the tool's image.
         assert len(rendition_bytes) <= MAX_IMAGE_RENDITION_BYTES
@@ -303,7 +305,7 @@ class TestReadFileOverProtocol:
         link = result.content[2]
         assert isinstance(link, ResourceLink)
         assert str(link.uri) == build_file_uri(PROJECT, "library/trip photos/café föto.jpg")
-        assert link.mimeType == "image/jpeg"
+        assert link.mime_type == "image/jpeg"
 
         data = data_of(result)
         assert data["original"]["size_bytes"] == len(original)
@@ -326,7 +328,7 @@ class TestReadFileOverProtocol:
     def test_image_base64_appears_only_in_the_image_block(
         self, run_session: Callable[[Any], Any]
     ) -> None:
-        async def body(session: ClientSession) -> CallToolResult:
+        async def body(session: Client) -> CallToolResult:
             return await session.call_tool(
                 "read_file",
                 {"project": PROJECT, "path": "library/trip photos/café föto.jpg"},
@@ -337,20 +339,20 @@ class TestReadFileOverProtocol:
         assert isinstance(image, ImageContent)
         payload = image.data
 
-        assert payload not in json.dumps(result.structuredContent)
+        assert payload not in json.dumps(result.structured_content)
         for block in result.content:
             if isinstance(block, TextContent):
                 assert payload not in block.text
         assert payload not in json.dumps(result.meta or {})
         # A meaningful sample of the payload must not be hiding anywhere else.
         sample = payload[:200]
-        assert json.dumps(result.structuredContent).count(sample) == 0
+        assert json.dumps(result.structured_content).count(sample) == 0
 
     @pytest.mark.usefixtures("project_files")
     def test_png_with_transparency_keeps_a_png_rendition(
         self, run_session: Callable[[Any], Any]
     ) -> None:
-        async def body(session: ClientSession) -> CallToolResult:
+        async def body(session: Client) -> CallToolResult:
             return await session.call_tool(
                 "read_file", {"project": PROJECT, "path": "inbox/thumb.png"}
             )
@@ -358,7 +360,7 @@ class TestReadFileOverProtocol:
         result = run_session(body)
         image = result.content[1]
         assert isinstance(image, ImageContent)
-        assert image.mimeType == "image/png"
+        assert image.mime_type == "image/png"
         data = data_of(result)
         # Never upscaled: a 64x48 source stays 64x48.
         assert data["rendition"]["width"] == 64
@@ -368,7 +370,7 @@ class TestReadFileOverProtocol:
     def test_image_parameter_bounds_are_rejected_by_the_schema(
         self, run_session: Callable[[Any], Any]
     ) -> None:
-        async def body(session: ClientSession) -> tuple[CallToolResult, CallToolResult]:
+        async def body(session: Client) -> tuple[CallToolResult, CallToolResult]:
             path = "library/trip photos/café föto.jpg"
             too_big = await session.call_tool(
                 "read_file", {"project": PROJECT, "path": path, "max_image_edge": 99999}
@@ -386,7 +388,7 @@ class TestReadFileOverProtocol:
     def test_text_file_returns_bounded_text_and_a_link(
         self, run_session: Callable[[Any], Any]
     ) -> None:
-        async def body(session: ClientSession) -> CallToolResult:
+        async def body(session: Client) -> CallToolResult:
             return await session.call_tool(
                 "read_file",
                 {"project": PROJECT, "path": "canvases/notes.txt", "max_text_chars": 20},
@@ -407,7 +409,7 @@ class TestReadFileOverProtocol:
     def test_pdf_is_resource_only_with_no_inline_binary(
         self, run_session: Callable[[Any], Any], project_files: dict[str, Path]
     ) -> None:
-        async def body(session: ClientSession) -> CallToolResult:
+        async def body(session: Client) -> CallToolResult:
             return await session.call_tool(
                 "read_file", {"project": PROJECT, "path": "library/report.pdf"}
             )
@@ -430,7 +432,7 @@ class TestReadFileOverProtocol:
     def test_missing_and_traversal_paths_produce_ferumind_error_codes(
         self, run_session: Callable[[Any], Any]
     ) -> None:
-        async def body(session: ClientSession) -> tuple[CallToolResult, CallToolResult]:
+        async def body(session: Client) -> tuple[CallToolResult, CallToolResult]:
             missing = await session.call_tool(
                 "read_file", {"project": PROJECT, "path": "library/nope.jpg"}
             )
@@ -450,13 +452,13 @@ class TestResourceReadsOverProtocol:
     ) -> None:
         uri = build_file_uri(PROJECT, "library/trip photos/café föto.jpg")
 
-        async def body(session: ClientSession) -> ReadResourceResult:
+        async def body(session: Client) -> ReadResourceResult:
             return await session.read_resource(cast("Any", uri))
 
         result = run_session(body)
         content = result.contents[0]
         assert isinstance(content, BlobResourceContents)
-        assert content.mimeType == "image/jpeg"
+        assert content.mime_type == "image/jpeg"
         assert base64.b64decode(content.blob) == project_files["photo"].read_bytes()
 
     def test_pdf_resource_round_trips_byte_for_byte(
@@ -464,12 +466,12 @@ class TestResourceReadsOverProtocol:
     ) -> None:
         uri = build_file_uri(PROJECT, "library/report.pdf")
 
-        async def body(session: ClientSession) -> ReadResourceResult:
+        async def body(session: Client) -> ReadResourceResult:
             return await session.read_resource(cast("Any", uri))
 
         content = run_session(body).contents[0]
         assert isinstance(content, BlobResourceContents)
-        assert content.mimeType == "application/pdf"
+        assert content.mime_type == "application/pdf"
         assert base64.b64decode(content.blob) == project_files["pdf"].read_bytes()
 
     def test_utf8_text_uses_text_resource_contents(
@@ -477,12 +479,12 @@ class TestResourceReadsOverProtocol:
     ) -> None:
         uri = build_file_uri(PROJECT, "canvases/notes.txt")
 
-        async def body(session: ClientSession) -> ReadResourceResult:
+        async def body(session: Client) -> ReadResourceResult:
             return await session.read_resource(cast("Any", uri))
 
         content = run_session(body).contents[0]
         assert isinstance(content, TextResourceContents)
-        assert content.mimeType == "text/plain"
+        assert content.mime_type == "text/plain"
         assert content.text == project_files["text"].read_text(encoding="utf-8")
 
     def test_the_uri_from_read_file_is_directly_readable(
@@ -490,11 +492,11 @@ class TestResourceReadsOverProtocol:
     ) -> None:
         """The acceptance path: list -> read_file -> resources/read."""
 
-        async def body(session: ClientSession) -> tuple[str, ReadResourceResult]:
+        async def body(session: Client) -> tuple[str, ReadResourceResult]:
             listed = await session.call_tool(
                 "list_files", {"project": PROJECT, "mime_type": "image/jpeg"}
             )
-            structured = cast("dict[str, Any]", listed.structuredContent)
+            structured = cast("dict[str, Any]", listed.structured_content)
             path = structured["data"]["files"][0]["path"]
             read = await session.call_tool("read_file", {"project": PROJECT, "path": path})
             link = read.content[2]
@@ -513,7 +515,7 @@ class TestResourceReadsOverProtocol:
     ) -> None:
         uri = build_file_uri(PROJECT, "library/report.pdf")
 
-        async def body(session: ClientSession) -> ReadResourceResult:
+        async def body(session: Client) -> ReadResourceResult:
             return await session.read_resource(cast("Any", uri))
 
         serialized = run_session(body).model_dump_json()
@@ -578,6 +580,40 @@ class TestResourceReadsOverProtocol:
         assert payload["size_bytes"] > 32
         assert payload["limit_bytes"] == 32
 
+    @pytest.mark.usefixtures("project_files")
+    def test_configured_transport_ceiling_reaches_the_resource_read(
+        self, run_session: Callable[[Any], Any], monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """REL-030 defect 1: the tunnel-wedge guard, proven at the wire.
+
+        Twice on 2026-08-04 an oversized ``resources/read`` was the last call
+        its server process ever served: base64 pushed a 13.9 MB and then a
+        9.1 MB original past the relay's 10,485,760-byte body cap, the child
+        died, and nothing respawned it — a 10-minute and then a 74-minute
+        outage. ``Config.max_resource_response_bytes`` exists to refuse those
+        reads instead.
+
+        The core guard is unit-tested in ``test_file_reads.py``, but nothing
+        proved the configured value was actually handed to it. Dropping the
+        ``max_response_bytes=`` argument in ``mcp/resources.py`` would leave
+        every other test green and silently restore the outage, so this drives
+        the whole chain: environment -> ``load_config`` -> ``read_file_resource``.
+        """
+        monkeypatch.setenv("FERUMIND_MAX_RESOURCE_MB", "1")
+
+        error = resource_error(
+            run_session, build_file_uri(PROJECT, "library/trip photos/café föto.jpg")
+        )
+
+        payload = cast("dict[str, Any]", error.data)
+        assert payload["error_code"] == "FILE_TOO_LARGE"
+        assert payload["max_response_bytes"] == 1024 * 1024
+        # base64 inflates 3 bytes to 4, so the usable original is 3/4 of the cap.
+        assert payload["max_original_bytes"] == 786_432
+        assert payload["encoded_estimate_bytes"] > payload["max_response_bytes"]
+        # The refusal has to name the way forward, not just say no.
+        assert payload["recommended_tool"] == "read_file"
+
 
 class TestObservationTelemetry:
     @pytest.mark.usefixtures("project_files")
@@ -586,12 +622,11 @@ class TestObservationTelemetry:
     ) -> None:
         from ferumind.core.observations import list_observations
         from ferumind.db.database import Database
-        from ferumind.mcp.observation import apply_observation_to_all_tools
-        from ferumind.mcp.server import mcp
 
-        apply_observation_to_all_tools(mcp)
+        # No installation step: observation is a constructor argument on the
+        # server, so every call through a client is observed by construction.
 
-        async def body(session: ClientSession) -> None:
+        async def body(session: Client) -> None:
             await session.call_tool("list_files", {"project": PROJECT})
             await session.call_tool(
                 "read_file",
@@ -626,3 +661,11 @@ class TestObservationTelemetry:
             blob = record.context_metrics_json + record.argument_keys_json
             assert "café" not in blob
             assert "%PDF" not in blob
+
+        # Client identity now reaches the log. These three columns were
+        # permanently null while observation lived inside the tool function,
+        # which could not see the connection.
+        for record in (listing, reading, resource):
+            assert record.client_name, f"{record.tool_name} recorded no client name"
+            assert record.client_version
+            assert record.protocol_version

@@ -1,9 +1,15 @@
-"""MCP proposal tools (spec-mcp §5.2): pending edits, never saved edits.
+"""MCP propose → apply tools (spec-mcp §5.2): the guarded edit transaction.
 
 A ``propose_*`` result carries ``document_mutated=false``,
 ``requires_apply=true``, ``next_required_tool=apply_patch``, and a policy
 echo. Proposals are bound to project + path + base hash, expire after 24 h,
 and are invalidated by out-of-band edits. The server informs; agents honor.
+
+``apply_patch`` is registered here rather than with the other content-mutating
+tools: it is the second half of one transaction, it is the only caller of
+:mod:`ferumind.core.patch_writes`'s apply path, and a reviewer reading the
+guards a proposal records should see the code that revalidates them without
+changing files.
 """
 # pyright: reportUnusedFunction=false
 
@@ -14,18 +20,23 @@ from typing import Annotated, Literal
 from mcp.types import CallToolResult
 from pydantic import Field
 
-from ferumind.core import writes
+from ferumind.core import patch_writes
 from ferumind.core.edit_targets import ExactEdit, InsertAnchor
 from ferumind.core.errors import FerumindError
+from ferumind.core.patch_writes import ProposalResult
 from ferumind.core.paths import PathSafetyError
 from ferumind.core.types import JsonObject
-from ferumind.core.writes import ProposalResult
 from ferumind.mcp.models import (
+    FerumindResult,
+    apply_state_fields,
     make_success,
     proposal_annotations,
     proposal_state_fields,
+    write_annotations,
+    write_result_data,
 )
 from ferumind.mcp.protocols import ToolRegistrar
+from ferumind.mcp.result_models import ApplyPatchData, DiscardPatchData, ProposalData
 from ferumind.mcp.tool_context import (
     error_result,
     require_database,
@@ -33,8 +44,6 @@ from ferumind.mcp.tool_context import (
     require_workspace,
     scoped_project,
 )
-
-type FerumindToolResult = CallToolResult
 
 _PROJECT_FIELD = Field(description="Project key; validated against the registry, never an override")
 _PATH_FIELD = Field(description="Project-relative Markdown path")
@@ -63,7 +72,7 @@ def _proposal_data(result: ProposalResult) -> JsonObject:
 
 
 def register_propose_tools(mcp: ToolRegistrar) -> None:
-    """Register the proposal tool family."""
+    """Register the propose → apply tool family."""
 
     @mcp.tool(
         name="propose_exact_replace_patch",
@@ -75,7 +84,6 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             "pending patch — call apply_patch to save."
         ),
         annotations=proposal_annotations(),
-        structured_output=False,
     )
     def propose_exact_replace_patch_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -106,14 +114,14 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
         expected_document_sha256: Annotated[
             str | None, Field(description="Optional document hash guard from a prior read")
         ] = None,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProposalData]]:
         try:
             require_format_gate().check_write()
             entry = scoped_project(project)
             db = require_database()
             conn = db.get_connection()
             try:
-                result = writes.propose_exact_replace_patch(
+                result = patch_writes.propose_exact_replace_patch(
                     conn,
                     require_workspace(),
                     entry.key,
@@ -138,7 +146,6 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             "proposal, one apply). Any failing edit aborts the whole batch."
         ),
         annotations=proposal_annotations(),
-        structured_output=False,
     )
     def propose_multi_edit_patch_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -156,14 +163,14 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
         expected_document_sha256: Annotated[
             str | None, Field(description="Optional document hash guard from a prior read")
         ] = None,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProposalData]]:
         try:
             require_format_gate().check_write()
             entry = scoped_project(project)
             db = require_database()
             conn = db.get_connection()
             try:
-                result = writes.propose_multi_edit_patch(
+                result = patch_writes.propose_multi_edit_patch(
                     conn,
                     require_workspace(),
                     entry.key,
@@ -185,7 +192,6 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             "get_document_map. Guarded by document and section hashes."
         ),
         annotations=proposal_annotations(),
-        structured_output=False,
     )
     def propose_section_patch_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -198,14 +204,14 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             str, Field(description="Section content hash from get_document_map")
         ],
         new_content: Annotated[str, Field(description="Replacement section content")],
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProposalData]]:
         try:
             require_format_gate().check_write()
             entry = scoped_project(project)
             db = require_database()
             conn = db.get_connection()
             try:
-                result = writes.propose_section_patch(
+                result = patch_writes.propose_section_patch(
                     conn,
                     require_workspace(),
                     entry.key,
@@ -229,7 +235,6 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             "Guarded by document and range hashes from a prior read."
         ),
         annotations=proposal_annotations(),
-        structured_output=False,
     )
     def propose_range_patch_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -243,14 +248,14 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             str, Field(description="Range hash from read_document_range")
         ],
         new_content: Annotated[str, Field(description="Replacement content for the range")],
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProposalData]]:
         try:
             require_format_gate().check_write()
             entry = scoped_project(project)
             db = require_database()
             conn = db.get_connection()
             try:
-                result = writes.propose_range_patch(
+                result = patch_writes.propose_range_patch(
                     conn,
                     require_workspace(),
                     entry.key,
@@ -276,7 +281,6 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             "document hash."
         ),
         annotations=proposal_annotations(),
-        structured_output=False,
     )
     def propose_search_replace_patch_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -298,14 +302,14 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
         include_code_blocks: Annotated[
             bool, Field(description="Match inside fenced code blocks")
         ] = True,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProposalData]]:
         try:
             require_format_gate().check_write()
             entry = scoped_project(project)
             db = require_database()
             conn = db.get_connection()
             try:
-                result = writes.propose_search_replace_patch(
+                result = patch_writes.propose_search_replace_patch(
                     conn,
                     require_workspace(),
                     entry.key,
@@ -334,7 +338,6 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             "anchor hash. The right tool for append-only logs."
         ),
         annotations=proposal_annotations(),
-        structured_output=False,
     )
     def propose_insert_patch_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -344,14 +347,14 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
         expected_document_sha256: Annotated[
             str, Field(description="Document hash from a prior read")
         ],
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProposalData]]:
         try:
             require_format_gate().check_write()
             entry = scoped_project(project)
             db = require_database()
             conn = db.get_connection()
             try:
-                result = writes.propose_insert_patch(
+                result = patch_writes.propose_insert_patch(
                     conn,
                     require_workspace(),
                     entry.key,
@@ -374,7 +377,6 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             "(id/type/project/created) and the automatic updated are protected."
         ),
         annotations=proposal_annotations(),
-        structured_output=False,
     )
     def propose_frontmatter_patch_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -389,14 +391,14 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
         expected_document_sha256: Annotated[
             str | None, Field(description="Optional document hash guard from a prior read")
         ] = None,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProposalData]]:
         try:
             require_format_gate().check_write()
             entry = scoped_project(project)
             db = require_database()
             conn = db.get_connection()
             try:
-                result = writes.propose_frontmatter_patch(
+                result = patch_writes.propose_frontmatter_patch(
                     conn,
                     require_workspace(),
                     entry.key,
@@ -420,7 +422,6 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
             "keep valid managed frontmatter. Prefer the targeted propose_* tools."
         ),
         annotations=proposal_annotations(),
-        structured_output=False,
     )
     def propose_patch_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -433,14 +434,14 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
         expected_document_sha256: Annotated[
             str | None, Field(description="Optional document hash guard from a prior read")
         ] = None,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProposalData]]:
         try:
             require_format_gate().check_write()
             entry = scoped_project(project)
             db = require_database()
             conn = db.get_connection()
             try:
-                result = writes.propose_patch(
+                result = patch_writes.propose_patch(
                     conn,
                     require_workspace(),
                     entry.key,
@@ -459,23 +460,22 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
         name="discard_patch",
         title="Discard Patch",
         description=(
-            "Withdraw a pending patch proposal so it can no longer be applied. "
-            "Only operation-log metadata changes; user Markdown is untouched."
+            "Withdraw a pending patch proposal so it can no longer be applied. Only "
+            "operation-log metadata changes; user Markdown is untouched."
         ),
         annotations=proposal_annotations(),
-        structured_output=False,
     )
     def discard_patch_tool(
         project: Annotated[str, _PROJECT_FIELD],
         operation_id: Annotated[str, Field(description="Operation id from any propose_* tool")],
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[DiscardPatchData]]:
         try:
             require_format_gate().check_write()
             entry = scoped_project(project)
             db = require_database()
             conn = db.get_connection()
             try:
-                result = writes.discard_patch(
+                result = patch_writes.discard_patch(
                     conn,
                     require_workspace(),
                     entry.key,
@@ -492,5 +492,38 @@ def register_propose_tools(mcp: ToolRegistrar) -> None:
                 },
                 project=entry.key,
             )
+        except (FerumindError, PathSafetyError) as exc:
+            return error_result(exc, project=project)
+
+    @mcp.tool(
+        name="apply_patch",
+        title="Apply Patch",
+        description=(
+            "Apply a previously proposed patch by operation_id. Revalidates the "
+            "proposal binding, hash guards, and 24 h TTL; snapshots before "
+            "writing. Returns the new document_sha256 — chain it into the next "
+            "edit's expected_document_sha256 instead of re-reading."
+        ),
+        annotations=write_annotations(),
+    )
+    def apply_patch_tool(
+        project: Annotated[str, _PROJECT_FIELD],
+        operation_id: Annotated[str, Field(description="Operation id from a propose_* tool")],
+    ) -> Annotated[CallToolResult, FerumindResult[ApplyPatchData]]:
+        try:
+            require_format_gate().check_write()
+            entry = scoped_project(project)
+            db = require_database()
+            conn = db.get_connection()
+            try:
+                result = patch_writes.apply_patch(
+                    conn, require_workspace(), entry.key, operation_id
+                )
+            finally:
+                conn.close()
+            data = write_result_data(result)
+            data["diff"] = result.diff
+            data.update(apply_state_fields(operation_id, result.operation_id))
+            return make_success(data, project=entry.key)
         except (FerumindError, PathSafetyError) as exc:
             return error_result(exc, project=project)

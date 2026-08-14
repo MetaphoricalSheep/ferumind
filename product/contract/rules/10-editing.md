@@ -2,19 +2,20 @@
 
 ## Lookup first, patch narrow
 
-Never re-read or rewrite a whole document when a narrower target exists:
+Walk only as far as needed. Never `read_document` first:
 
-1. `search_project` → find the document.
-2. `get_document_map` → find the section.
-3. `find_in_document` / `read_document_range` → find the exact text.
+1. `search_project` → section hits with `start_line`/`end_line`.
+2. `read_document_range` on a hit (skip the map when the hit is enough).
+3. `get_document_map` only for broader structure; it can be large.
 4. `propose_exact_replace_patch` (preferred) or `propose_multi_edit_patch`
    for several edits to one document; positional patches
    (`propose_section_patch`, `propose_range_patch`, `propose_insert_patch`)
    for placement; `propose_frontmatter_patch` for metadata.
 5. `apply_patch`.
 
-Use `propose_patch mode=body` only to intentionally replace a full body;
-`mode=full` only for explicit full-file operations.
+`find_in_document` finds an exact string in a known document. Use
+`propose_patch mode=body` only to replace a full body; `mode=full` only for
+explicit full-file operations.
 
 ## A proposal is not a saved edit
 
@@ -40,6 +41,8 @@ changed lines back to the user.
 ## Creating documents
 
 New documents go through `create_document` (or `capture_note` for inbox
-items) — never through patches against paths that don't exist. Give log
-canvases `edit_policy: append` and a month-stamped name
+items) — never through patches against paths that don't exist. Give every
+new document a `description` (see the contract); when a document's purpose
+drifts, correct it with `propose_frontmatter_patch` — it is not protected.
+Give log canvases `edit_policy: append` and a month-stamped name
 (`garden-log-2026-07.md`); start next month's file when the month turns.

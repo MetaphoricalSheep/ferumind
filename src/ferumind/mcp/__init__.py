@@ -1,1 +1,1 @@
-"""Ferumind MCP server: stateless, project-scoped tool surface (spec-mcp v2)."""
+"""Ferumind MCP server: stateless, project-scoped tool surface (spec-mcp)."""

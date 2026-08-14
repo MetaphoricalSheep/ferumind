@@ -12,10 +12,11 @@ from pydantic import BaseModel, ConfigDict
 
 from ferumind.core.documents import compute_sha256
 from ferumind.core.folders import SPINE_FILENAME
-from ferumind.core.format import SUPPORTED_FORMAT
+from ferumind.core.format import read_format
 from ferumind.core.paths import PathSafetyError, WorkspaceRoot, contained_path
 from ferumind.core.reconcile import reconcile_project
 from ferumind.core.registry import ProjectEntry
+from ferumind.core.skills import list_skills
 from ferumind.core.types import DbConnection
 
 
@@ -43,23 +44,57 @@ class ContextSpine(BaseModel):
 
 
 class ContextDocument(BaseModel):
+    """One entry in the document map: what it is for, and what reading it costs.
+
+    ``description`` and ``size_bytes`` together are the cheap first navigation
+    layer — purpose and read cost for every document in the project, so an
+    agent can choose a target without retrieving anything. Structure is
+    ``get_document_map``'s job, not this one's.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     path: str
     title: str
+    description: str
     folder: str
     status: str
     edit_policy: str
     updated: str
+    size_bytes: int
+
+
+class ContextSkill(BaseModel):
+    """One Ferumind skill index entry: its name and when to reach for it.
+
+    The body is deliberately absent. Skills are on-demand procedures (product
+    D7): the trigger is cheap enough to carry on every call, a full procedure
+    is not, and ``read_skill`` fetches the body when the trigger matches.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    name: str
+    description: str
+    path: str
 
 
 class ContextPayload(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    format: int
+    format: int | None
     rules_bytes: int
     spine_bytes: int
     documents_count: int
+    #: What the skills index costs on every call. Separate from ``rules_bytes``
+    #: because it is a distinct claimant on the same uncapped budget, and the
+    #: per-skill cost is what decides whether another skill can be afforded.
+    skills_bytes: int
+    #: What the document map's descriptions cost, separately from the map
+    #: itself. Descriptions are the one part of this payload that grows with
+    #: both the project's size and how much its agents write, so the cap
+    #: decision spec-mcp §4 parks on telemetry needs its own number for them.
+    descriptions_bytes: int
 
 
 class ProjectContext(BaseModel):
@@ -70,6 +105,7 @@ class ProjectContext(BaseModel):
     spine: ContextSpine | None
     spine_missing: bool
     documents: list[ContextDocument]
+    skills: list[ContextSkill]
     inbox_count: int
     payload: ContextPayload
 
@@ -124,7 +160,8 @@ def build_context(
         )
 
     rows = conn.execute(
-        """SELECT path, title, folder, status, edit_policy, updated_at
+        """SELECT path, title, description, folder, status, edit_policy,
+                  updated_at, size_bytes
            FROM documents
            WHERE project_key = ?
              AND status != 'archived'
@@ -136,10 +173,14 @@ def build_context(
         ContextDocument(
             path=row["path"],
             title=row["title"],
+            description=row["description"],
             folder=row["folder"],
             status=row["status"],
             edit_policy=row["edit_policy"],
             updated=row["updated_at"],
+            # Reused from the derived row the indexer already maintains from
+            # the file stat, not a fresh stat per document.
+            size_bytes=row["size_bytes"],
         )
         for row in rows
     ]
@@ -150,12 +191,25 @@ def build_context(
     ).fetchone()
     inbox_count = int(inbox_row["n"])
 
+    skills = [
+        ContextSkill(name=skill.name, description=skill.description, path=skill.path)
+        for skill in list_skills(workspace_root)
+    ]
+
     spine_bytes = len(spine.content_markdown.encode("utf-8")) if spine is not None else 0
     payload = ContextPayload(
-        format=SUPPORTED_FORMAT,
+        # Reads deliberately remain available for older and unmarked
+        # workspaces. Echo what this workspace actually declares rather than
+        # the build's supported version; ``None`` preserves the distinction
+        # between an unreadable marker and an invented legacy format.
+        format=read_format(workspace_root),
         rules_bytes=len(rules.content_markdown.encode("utf-8")),
         spine_bytes=spine_bytes,
         documents_count=len(documents),
+        skills_bytes=sum(
+            len(f"{skill.name}{skill.description}{skill.path}".encode()) for skill in skills
+        ),
+        descriptions_bytes=sum(len(doc.description.encode("utf-8")) for doc in documents),
     )
 
     return ProjectContext(
@@ -164,6 +218,7 @@ def build_context(
         spine=spine,
         spine_missing=spine is None,
         documents=documents,
+        skills=skills,
         inbox_count=inbox_count,
         payload=payload,
     )

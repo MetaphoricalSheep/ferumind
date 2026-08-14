@@ -18,7 +18,7 @@ from ferumind.core.file_reads import (
     resolve_project_file,
 )
 from ferumind.core.paths import PathSafetyError, WorkspaceRoot, contained_project_root
-from ferumind.core.writes import MAX_UPLOAD_BYTES
+from ferumind.core.write_limits import MAX_UPLOAD_BYTES
 from tests.unit.test_renditions import noisy_image
 
 
@@ -199,6 +199,50 @@ class TestImageContext:
         assert max(result.rendition.width, result.rendition.height) <= 1024
         assert result.rendition.size_bytes < len(before)
         assert source.read_bytes() == before
+
+    def test_rendition_never_exceeds_the_original_it_bounds(
+        self, workspace: WorkspaceRoot, project: str, project_root: Path
+    ) -> None:
+        """REL-030 defect 2, at the ``read_file`` boundary.
+
+        A source already saved below the rendition cap must not come back
+        bigger than it went in.
+        """
+        (project_root / "library").mkdir(parents=True, exist_ok=True)
+        source = project_root / "library" / "squeezed.jpg"
+        noisy_image(512, 512).save(source, format="JPEG", quality=20, optimize=True)
+        original_size = source.stat().st_size
+
+        result = read_file_for_context(workspace, project, "library/squeezed.jpg")
+
+        assert result.representation == "image"
+        assert result.rendition is not None
+        assert result.rendition.size_bytes <= original_size
+
+    def test_image_with_no_smaller_encoding_becomes_resource_only(
+        self,
+        workspace: WorkspaceRoot,
+        project: str,
+        project_root: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """When no encoding fits, say so rather than shipping an inflated one."""
+        from ferumind.core import renditions
+
+        monkeypatch.setattr(renditions, "MIN_RENDITION_BYTE_CEILING", 1)
+        monkeypatch.setattr(renditions, "MAX_IMAGE_RENDITION_BYTES", 1)
+        (project_root / "library").mkdir(parents=True, exist_ok=True)
+        source = project_root / "library" / "stubborn.jpg"
+        noisy_image(900, 700).save(source, format="JPEG", quality=90)
+
+        result = read_file_for_context(workspace, project, "library/stubborn.jpg")
+
+        assert result.representation == "resource_only"
+        assert result.reason == "no_rendition_smaller_than_original"
+        assert result.rendition is None
+        # The original is still reachable byte-for-byte.
+        assert result.file.resource_uri
+        assert source.exists()
 
     def test_malformed_image_fails_as_a_ferumind_error(
         self, workspace: WorkspaceRoot, project: str, project_root: Path

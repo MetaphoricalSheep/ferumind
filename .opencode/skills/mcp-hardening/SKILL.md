@@ -34,6 +34,40 @@ metadata:
 - Operation log for every mutation
 - Observation log records metadata only, with secret redaction
 
+## The two server-boundary layers (do not merge them)
+
+`mcp/tool_boundary.py` and `mcp/observation.py` look adjacent and are not.
+
+- **`tool_boundary.py` sanitises.** It subclasses the SDK's
+  `FuncMetadata.call_fn_with_arg_validation` — the one frame that actually
+  calls `tool.fn` — so bad arguments and crashing tool bodies both leave as a
+  Ferumind envelope (`VALIDATION_ERROR` / `INTERNAL_ERROR`). **This cannot move
+  outward.** `Tool.run` re-raises any exception as
+  `ToolError(f"Error executing tool {name}: {e}")` and `MCPServer` returns that
+  string as tool content, so anything catching further out sees a result whose
+  text already contains the exception message. A raw `RuntimeError` can carry a
+  signed URL or an absolute path.
+- **`observation.py` records.** It is a `ServerMiddleware` passed to
+  `MCPServer(middleware=[...])`, so it needs no access to tools and cannot fail
+  to attach. It covers `tools/call` and `resources/read`, and reads the
+  serialized wire dict (camelCase `structuredContent` / `isError`) that
+  `call_next` returns — not a `CallToolResult`.
+
+They share only a correlation id, via a `ContextVar` the middleware sets, so a
+user-visible `INTERNAL_ERROR` can be matched to its observation row.
+
+## Private SDK access
+
+Two attachment points remain, both centralised in `mcp/sdk_internals.py` and
+both **fail closed**: `_lowlevel_server` (bounded stdio transport,
+`resources/read` handler) and `_tool_manager` (to reach its public
+`list_tools`/`get_tool`, and to replace generated argument metadata).
+
+Never reach for these directly from another module, and never let a missing hook
+degrade to a warning — a server that cannot install the tool boundary would
+answer bad input with pydantic's rendering of that input. The `mcp` range in
+`pyproject.toml` is capped because these two exist.
+
 ## Lookup-First Granular Editing
 
 - Provide lookup tools so an assistant can target the smallest safe edit:
@@ -41,8 +75,9 @@ metadata:
   `readOnlyHint: true, idempotentHint: true`).
 - Provide granular propose tools — `propose_section_patch`,
   `propose_range_patch`, `propose_search_replace_patch`, `propose_insert_patch` —
-  in addition to the coarse `propose_patch` fallback. Propose tools write
-  operation records, so they are **not** read-only.
+  in addition to the coarse `propose_patch` fallback. Proposal tools do not
+  mutate user Markdown, so they advertise `readOnlyHint: true` and
+  `idempotentHint: false` even though they stage operation metadata.
 - Every granular edit is guarded by two hashes: `expected_document_sha256` plus a
   target hash (`expected_section_sha256` / `expected_range_sha256` /
   `expected_anchor_sha256`, or `expected_match_count` for search/replace).
@@ -60,5 +95,14 @@ metadata:
   `TARGET_HASH_MISMATCH`, `VALIDATION_ERROR`, `PROJECT_REQUIRED`,
   `PROJECT_NOT_FOUND`, `PATCH_EXPIRED`, `DOCUMENT_ARCHIVED`,
   `UNKNOWN_FOLDER`, `CANNOT_ARCHIVE_SPINE`, `PATH_EXISTS`.
-- Tool names stay snake_case (never dotted); every tool exposes `outputSchema`
-  and returns `FerumindToolResult`.
+- Tool names stay snake_case (never dotted).
+- **Every tool exposes an `outputSchema`.** Declare tools as
+  `-> Annotated[CallToolResult, FerumindResult[Payload]]`; the SDK derives the
+  success-and-failure schema from the metadata type while returning the
+  hand-built `CallToolResult` verbatim. Never pass `structured_output`: that
+  short-circuits derivation and strips the schema. Verify the real wire
+  conversion path in `tests/integration/test_mcp_surface.py`, because calling
+  `tool.fn` alone does not prove SDK registration and serialization behavior.
+- Keep tool descriptions focused on when to call the tool and what the result
+  means. Field shape belongs in `inputSchema` and `outputSchema`, not in a
+  second prose contract that can drift.

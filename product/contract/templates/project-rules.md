@@ -1,5 +1,6 @@
 ---
 title: "{{project_title}} — Rules"
+description: "Human-owned rules specific to {{project_title}}, layered on top of the workspace rules: standing behaviors, constraints, and how to communicate here."
 status: active
 edit_policy: ask-human
 ---

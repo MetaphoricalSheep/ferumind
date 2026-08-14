@@ -8,7 +8,7 @@ optional machine-readable recovery data (current hashes, match locations,
 limits) so a client can correct a failed call without extra lookup
 round-trips.
 
-The v2 code list is spec-mcp §7; there are no session error codes.
+The code list is spec-mcp §7; there are no session error codes.
 """
 
 from __future__ import annotations
@@ -64,6 +64,22 @@ class FormatUnsupportedError(FerumindError):
     code: ClassVar[str] = "FORMAT_UNSUPPORTED"
 
 
+class MigrationPrerequisiteError(FerumindError):
+    """Raised when a workspace does not yet satisfy a format's prerequisites.
+
+    Distinct from ``FORMAT_UNSUPPORTED`` on purpose: that says the build and
+    the workspace disagree about the format, while this says the migration
+    could run but the workspace is not ready for it. It is raised before any
+    backup or transformation exists, so nothing has changed and no recovery is
+    required — the remedy is to finish preparing and run ``migrate`` again.
+
+    CLI-surface only. ``ferumind migrate`` is the sole entry point to
+    migration, so this code never reaches the MCP tool surface.
+    """
+
+    code: ClassVar[str] = "MIGRATION_PREREQUISITE_UNMET"
+
+
 # ── Documents and folders ────────────────────────────────────────────────────
 
 
@@ -81,6 +97,17 @@ class UnknownFolderError(FerumindError):
     """Raised when a document path does not start with a role folder."""
 
     code: ClassVar[str] = "UNKNOWN_FOLDER"
+
+
+class SkillNotFoundError(FerumindError):
+    """Raised when a named Ferumind skill is not installed in the workspace.
+
+    Distinct from ``DOCUMENT_NOT_FOUND``: a skill is workspace-level behaviour
+    text under ``system/skills/``, never a project document, so no project
+    scope applies and no document path is being resolved.
+    """
+
+    code: ClassVar[str] = "SKILL_NOT_FOUND"
 
 
 class CannotArchiveSpineError(FerumindError):
@@ -120,6 +147,17 @@ class FileTooLargeError(FerumindError):
     """Raised when a decoded upload payload exceeds the size cap."""
 
     code: ClassVar[str] = "FILE_TOO_LARGE"
+
+
+class RenditionTooLargeError(FileTooLargeError):
+    """Raised when no rendition fits a file's effective byte ceiling.
+
+    A narrower case than its parent, and the only one ``read_file`` converts
+    into a ``resource_only`` result instead of an error: the source decodes
+    fine, but every encoding the renderer can produce would be larger than
+    the original it is supposed to bound. Subclassing keeps the wire code
+    ``FILE_TOO_LARGE`` for callers that do see it raised directly.
+    """
 
 
 class UploadIncompleteError(FerumindError):
@@ -277,6 +315,7 @@ ERROR_CODES: Final[tuple[str, ...]] = (
     "DOCUMENT_NOT_FOUND",
     "DOCUMENT_ARCHIVED",
     "UNKNOWN_FOLDER",
+    "SKILL_NOT_FOUND",
     "CANNOT_ARCHIVE_SPINE",
     "PATH_EXISTS",
     "DOCUMENT_EXISTS",

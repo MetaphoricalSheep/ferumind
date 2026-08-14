@@ -5,7 +5,9 @@ from collections.abc import Mapping
 
 from pydantic import BaseModel, ConfigDict
 
-type JsonValue = str | int | float | bool | None | list[JsonValue] | dict[str, JsonValue]
+# ``None`` goes last (RUF036): a union reads more clearly with the absence case
+# at the end, and Ruff 0.16 enforces it.
+type JsonValue = str | int | float | bool | list[JsonValue] | dict[str, JsonValue] | None
 type JsonObject = dict[str, JsonValue]
 type JsonMapping = Mapping[str, JsonValue]
 type DbConnection = sqlite3.Connection

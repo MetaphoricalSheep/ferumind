@@ -70,6 +70,7 @@ workspace/
   compacts/            ← workspace-level chat handoff compacts
   system/
     rules/             ← workspace-level rules (how any agent behaves here)
+    skills/            ← on-demand Ferumind skills, fetched by trigger (D7)
     prompts/           ← the bootstrap prompt
     schemas/, templates/
   projects/<key>/
@@ -123,6 +124,22 @@ into shared documents. Memory is compacted (roll old notes into summaries,
 archive the raw file), never deleted. Concurrency is handled by the existing
 hash-guarded patches — a conflict fails clean.
 
+The folder carries two layers. **Curated memory** is what an agent should
+remember and act on; it keeps every behavior described above, including its
+ability to be prescriptive. **Episodes** are what happened: decisions and the
+reasoning available at the time, incidents, corrections, experiments and
+their outcomes, approaches that failed. Episodes are historical evidence, not
+standing instructions — a later agent may reason from one, but recording it
+never made it authoritative, and it does not override current state.
+
+Episodes live in `memory/episodes/YYYY-MM.md`, one document per calendar
+month, created the first time one is recorded and never seeded empty. That is
+a subdirectory of an existing role folder, so it needs no new top-level
+folder, no `role:` key, and no format bump, and a project that records none
+is indistinguishable from one on the previous contract. An episode is often
+what D6 distillation later consumes — the gotcha captured when it happened
+rather than reconstructed afterwards.
+
 ### D6 — Archive and distillation
 
 Archive is a lifecycle state first (`status: archived`), a folder move second
@@ -133,6 +150,12 @@ distillation trigger: fold what still matters into memory or library, then
 archive. Distillation is human-initiated and agent-nudged — the agent suggests
 it at natural moments (phase end, bloated canvas, re-derived fact); no
 background job, because distillation requires judgment and a conversation.
+Evidence-derived, load-bearing library claims keep ordinary Markdown
+`## Sources` links, applied forward rather than fabricated for history;
+`description` says what a document is for, not where its claims came from.
+Archived source paths resolve through the archive mirror. Sources remain
+evidence rather than instructions, and the server neither follows them nor
+judges whether they support a claim.
 
 ### D7 — Rules layering and ownership
 
@@ -141,9 +164,13 @@ call returns the merged contract (concatenation with source headers, no
 semantic merging). Rules are the human's files — `edit_policy: ask-human`,
 always. Agents edit them only on explicit request in-conversation, but are
 expected to *recommend* changes when they notice repeated corrections. Skills
-(on-demand procedures with triggers, an index, due-ness) are **phase 2**;
-`rules/` is designed ready to grow a `skills/` sibling, and none of the skills
-machinery (cadence frontmatter, `last_run`, due-now reporting) is built in v1.
+are on-demand procedures with triggers and an index, and they are **built**:
+`system/skills/` is the sibling `rules/` was designed to grow, `get_context`
+carries a name-plus-trigger index, and `read_skill` fetches a body when the
+trigger matches. **Due-ness is deliberately not built** — no cadence
+frontmatter, no `last_run`, no due-now reporting. Every trigger in real use is
+situational rather than temporal, and per-agent mutable state has no home in a
+server that is stateless per call.
 
 ### D8 — No sessions; one connector; stateless per call
 
@@ -181,11 +208,13 @@ instructions carry a condensed echo. The shape:
 > trusting chat memory; record what's worth keeping back into the workspace.
 > If Ferumind is unreachable, say so before advising from memory.
 
-`get_context` returns the merged rules, the spine, and the document map.
-Size discipline (decided 11 Jul): **uncapped in v1, observed** — every call
-logs its payload sizes (rules/spine/map) to the observation log and the
-observation log; a cap is a later decision made from that data, because the
-fat-prompt risk is real but the right number isn't guessable in advance.
+`get_context` returns the merged rules, the spine, the document map, the skill
+index (D7), and the inbox count. Size discipline (decided 11 Jul): **uncapped
+to start, observed** — every call logs its payload sizes to the observation log
+and echoes the same numbers in the result's `payload` field, so they are
+visible in transcripts too; a cap is a later decision made from that data,
+because the fat-prompt risk is real but the right number isn't guessable in
+advance.
 
 ### D10 — Validation is dogfooding
 
@@ -232,48 +261,73 @@ boundary on purpose.
 
 ### D12 — Out-of-band edits are a first-class path
 
-Hand-editing on disk (vim, Obsidian) is core, not an edge case. Two
-mechanisms, division of labor: **reconcile-on-read** is the correctness floor
-(every core read mtime-checks; on drift it reindexes, invalidates pending
-proposals bound to the old hash, and logs `source: out-of-band`) and the
-**filesystem watcher** is the liveness layer (debounced snapshot-on-detect,
-covering edits no read would catch). The watcher will miss things (server
-down, synced mounts, atomic renames); reconcile-on-read is the backstop.
+Hand-editing on disk (vim, Obsidian) is core, not an edge case.
+**Reconcile-on-read** is the mechanism: every core read mtime-checks; on drift
+it reindexes, invalidates pending proposals bound to the old hash, and logs
+`source: out-of-band`. An agent never acts on a stale copy at the point of use.
+
+**Decision, 2026-08-06: the filesystem watcher is removed.** The original
+design paired reconcile-on-read with a debounced snapshot-on-detect watcher as
+a liveness layer, on the theory that some edits need catching before the next
+read. Operational evidence says they do not: across ~4 weeks and 2,241 recorded
+operations, 4 were out-of-band (0.18%, roughly one a week) and reconcile-on-read
+caught every one. A supervised background process, a runtime dependency, and a
+restart/failure story is not a proportionate answer to a weekly event that is
+already covered. The watcher was never wired into a lifecycle, so nothing that
+worked stopped working.
+
+The trade is explicit and accepted: an out-of-band edit is now detected at the
+next read that touches the path, not within a debounce window. The recovery
+point (snapshot-on-detect) is therefore not captured for a file that is edited
+and then never read again. Snapshot-before-mutation still protects every write
+Ferumind makes.
 
 ### D13 — Workers and agents
 
 The judgment-shaped agent stubs (triage, docs, runbooks, decisions) dissolve
 into procedures executed by whichever chat agent is connected — the chat
-agent *is* the agent. Mechanical workers (index, backup, maintenance,
-link-checking) stay: no LLM, no judgment. Headless autonomous agents are
+agent *is* the agent. Mechanical work (indexing, maintenance) stays: no LLM,
+no judgment — but it runs inline on the calling path, not in a background
+worker. As of 2026-08-06 there is no workers layer at all: the watcher was
+removed (D12) and the backup/link-checking workers were never built.
+Headless autonomous agents are
 parked behind a cost-control gate; when they come, they are just another MCP
 client obeying the same contract — zero design change.
 
-### D14 — Fresh start, migrate later
+### D14 — Fresh start
 
-v2 is built clean (decided 11 Jul): new workspace layout, new tool surface,
-no compatibility shims, no dual v1/v2 surfaces. Existing projects stay on the
-old layout untouched until v2 has proven itself in dogfood; the pilot project
-is *recreated* under the new layout, not migrated. A migration plan for the
-remaining projects is written after dogfood, with the benefit of real usage.
-This dissolves the cutover/split-brain question that blocked the first spec
-attempt.
+Built clean (decided 11 Jul): new workspace layout, new tool surface, no
+compatibility shims, no dual surfaces. The pilot project was *recreated*
+under the current layout rather than migrated. That dissolved the
+cutover/split-brain question which had blocked the first spec attempt.
+
+Nothing was carried across, and nothing is left to carry: there is no
+importer for the preceding layout and none is planned. A workspace moves
+between formats through `ferumind migrate` (spec-versioning §1.3) or not at
+all.
 
 ### D15 — Version the workspace, not the API
 
-Decided 12 Jul, so v3 never needs a rebuild. The workspace format (folders,
-frontmatter contract, `system/` files) carries an explicit version —
-`format: 2` in `workspace/system/meta.yml`, whole-workspace granularity. The
-server supports exactly one format: older workspaces stay readable but
-writes refuse with `FORMAT_UNSUPPORTED` until a human runs `ferumind migrate`
-(snapshot- and backup-protected; never implicit). The MCP surface is not
+Decided 12 Jul, so the next format never needs a rebuild. The workspace
+format (folders, frontmatter contract, `system/` files) carries an
+explicit version — currently `format: 3` in `workspace/system/meta.yml`, at
+whole-workspace granularity. The marker was introduced at format 2; format 3
+made document descriptions mandatory. The
+server supports exactly one document contract: older markers keep read
+entrypoints open for semantically prepared documents, while writes refuse
+with `FORMAT_UNSUPPORTED` until a human runs `ferumind migrate`
+(snapshot- and backup-protected; never implicit). There is no second legacy
+parser; an unprepared document that violates the current contract fails
+closed. The MCP surface is not
 wire-versioned — chats are disposable, so there are no long-lived clients to
 break: tools stay stable and additive within a format, `get_context`
 re-teaches every fresh chat, and breaking tool changes ride a format bump.
-The standing rule: **a breaking workspace change is not done until its
-migrator ships in the same change.** SQLite stays (right engine, was just
-under-finished): schema versioned by numbered migrations, search upgraded to
-FTS5, dead write-only tables dropped. Full detail in
+The standing rule: **a breaking workspace change is not done until migration
+is tested and proven in the same work unit.** Migrators normally ship; an
+explicit single-owner/single-workspace decision may instead authorize audited,
+untracked one-shot tooling that is executed and deleted before landing. SQLite
+stays (right engine, was just under-finished): schema versioned by numbered
+migrations, search upgraded to FTS5, dead write-only tables dropped. Full detail in
 [spec-versioning.md](spec-versioning.md).
 
 ## Evidence, honestly weighted
@@ -296,8 +350,9 @@ counterexample D1 and D10 must answer in use.
   looks like (D9).
 - Log ergonomics: cheap "last N entries" reads across a monthly rollover
   boundary.
-- Skills mechanics (phase 2): index delivery, trigger kinds, due-ness — the
-  attic drafts hold the candidate design.
+- Skills due-ness: cadence frontmatter, `last_run`, and due-now reporting.
+  Index delivery and triggers shipped; due-ness waits for a genuinely
+  time-based skill to justify per-agent state.
 - Freshness metadata (`as_of`) for reference docs — only if prose warnings
   keep hurting.
 - Semantic/embedding search — parked post-dogfood (D15 forks chose "FTS5 now
@@ -308,8 +363,8 @@ counterexample D1 and D10 must answer in use.
 
 ## The folder
 
-- [spec-mcp.md](spec-mcp.md) — MCP surface v2: scoping, tool inventory with
-  schemas, frontmatter v2, errors, de-sessioning, acceptance criteria.
+- [spec-mcp.md](spec-mcp.md) — the MCP surface: scoping, tool inventory with
+  schemas, frontmatter, errors, statelessness, acceptance criteria.
 - [spec-flows.md](spec-flows.md) — the end-to-end behaviors the specs add
   up to.
 - [spec-versioning.md](spec-versioning.md) — workspace format versioning,

@@ -18,7 +18,7 @@ from ferumind.core.files import (
     sidecar_for_path,
 )
 from ferumind.core.paths import PathSafetyError, WorkspaceRoot, contained_project_root
-from ferumind.core.writes import upload_library_file
+from ferumind.core.upload_writes import upload_library_file
 
 
 @pytest.fixture

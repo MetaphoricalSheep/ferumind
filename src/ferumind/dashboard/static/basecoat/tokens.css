@@ -1,0 +1,159 @@
+/*
+ * basecoat — design tokens (single source of truth for BOTH tiers)
+ * ----------------------------------------------------------------------------
+ * Dark-first. Two layers, per docs/design-tokens.md:
+ *   1. Primitive palette  — raw values; an implementation detail.
+ *   2. Semantic tokens    — what components actually reference.
+ *
+ * Components must use the SEMANTIC tokens (--bc-surface, --bc-text-muted, the
+ * --bc-tone-* scale, …), never the primitives and never a raw hex. Tints, washes
+ * and glows are derived at the point of use with color-mix() so we don't ship a
+ * combinatorial explosion of hard-coded colors.
+ *
+ * This file is consumed unchanged by Tier 2 (imported through the theme package)
+ * and Tier 1 (linked, or inlined as a snapshot in the portable starter template).
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* ── 1. Primitive palette — do NOT reference these from components ─────── */
+  --bc-palette-ink-900: #101216; /* page backdrop */
+  --bc-palette-ink-800: #12161d; /* inset / nested surfaces */
+  --bc-palette-ink-700: #181d24; /* lifted panel surface */
+  --bc-palette-ink-600: #1f2630; /* hover / elevated surface */
+  --bc-palette-slate-600: #2b3440; /* borders / dividers */
+  --bc-palette-slate-500: #3a4654; /* stronger border / input */
+  --bc-palette-slate-300: #9aa8b6; /* muted cool grey text */
+  --bc-palette-fog-50: #edf2f7; /* near-white text */
+
+  --bc-palette-teal-400: #49b2a5; /* primary accent */
+  --bc-palette-blue-400: #5b9ce0; /* decorative accent */
+  --bc-palette-violet-400: #a78bf6; /* decorative accent */
+  --bc-palette-green-400: #3dd68c; /* success */
+  --bc-palette-amber-400: #d7a84f; /* caution */
+  --bc-palette-red-400: #e06c75; /* danger */
+
+  /* ── 2. Semantic tokens — reference THESE ─────────────────────────────── */
+
+  /* Surfaces & lines */
+  --bc-bg: var(--bc-palette-ink-900);
+  --bc-surface: var(--bc-palette-ink-700);
+  --bc-surface-inset: var(--bc-palette-ink-800);
+  --bc-surface-raised: var(--bc-palette-ink-600);
+  --bc-border: var(--bc-palette-slate-600);
+  --bc-border-strong: var(--bc-palette-slate-500);
+
+  /* Text */
+  --bc-text: var(--bc-palette-fog-50);
+  --bc-text-muted: var(--bc-palette-slate-300);
+
+  /* Accents (primary + decorative). Primary carries brand/interaction. */
+  --bc-accent: var(--bc-palette-teal-400);
+  --bc-on-accent: #06181a; /* dark ink for text/icons sitting on --bc-accent (AA on teal) */
+  --bc-accent-blue: var(--bc-palette-blue-400);
+  --bc-accent-violet: var(--bc-palette-violet-400);
+
+  /* Tone scale — the backbone. One token per tone drives bar/dot/wash/text. */
+  --bc-tone-success: var(--bc-palette-green-400);
+  --bc-tone-caution: var(--bc-palette-amber-400);
+  --bc-tone-danger: var(--bc-palette-red-400);
+  --bc-tone-neutral: var(--bc-palette-slate-300);
+  /* Dark ink for text placed on a solid tone fill (AA on these light tones). */
+  --bc-on-tone: #0b1016;
+
+  /* Decorative hue cycle used by stat rows (left-bar colors rotate through these). */
+  --bc-cycle-1: var(--bc-accent);
+  --bc-cycle-2: var(--bc-accent-blue);
+  --bc-cycle-3: var(--bc-accent-violet);
+  --bc-cycle-4: var(--bc-tone-success);
+  --bc-cycle-5: var(--bc-tone-caution);
+
+  /* Radii rhythm: sm buttons → md cards → lg panels → full pills. */
+  --bc-radius-sm: 0.375rem;
+  --bc-radius-md: 0.625rem;
+  --bc-radius-lg: 1rem;
+  --bc-radius-full: 9999px;
+
+  /* Typography */
+  --bc-font-sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --bc-font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Fira Code", Menlo, monospace;
+
+  /*
+   * Elevation. Each shadow leads with a faint inset top highlight ("lit from above")
+   * so surfaces read as raised rather than flat — the subtle depth that ties the
+   * system together. Drop shadows stay soft and dark for the control-room feel.
+   */
+  --bc-shadow-panel:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.4),
+    0 12px 32px -12px rgb(0 0 0 / 0.55);
+  --bc-shadow-card:
+    inset 0 1px 0 0 rgb(255 255 255 / 0.04), 0 1px 2px rgb(0 0 0 / 0.3),
+    0 6px 18px -12px rgb(0 0 0 / 0.5);
+  --bc-shadow-button: inset 0 1px 0 0 rgb(255 255 255 / 0.07), 0 1px 2px rgb(0 0 0 / 0.35);
+
+  /*
+   * The shared light language is a soft RADIAL glow (see the corner glows on Panel,
+   * StatTile, and StatusCard). For small filled controls (buttons, badges) we use the
+   * same idiom as a gentle light "bloom" from just above the top edge — a lighter spot
+   * that reads on both light and dark fills — rather than a flat linear gloss. Tinted
+   * surface glows stay defined per component (in their accent/tone color).
+   */
+  --bc-gloss: radial-gradient(
+    115% 85% at 50% -10%,
+    rgb(255 255 255 / 0.22),
+    rgb(255 255 255 / 0) 55%
+  );
+
+  /* Motion (respect prefers-reduced-motion at point of use) */
+  --bc-duration: 160ms;
+  --bc-ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+}
+
+/*
+ * Dark-first: the tokens above are the dark theme and apply at :root, so a page is
+ * on-brand dark with no class at all. `.dark` re-asserts dark (and enables shadcn's
+ * `dark:` variant). `.light` flips to the light theme.
+ */
+.dark {
+  color-scheme: dark;
+}
+
+/*
+ * Light theme — secondary, but it must look good. Only the SEMANTIC tokens change;
+ * everything downstream (shadcn vars, the accent cycle, component CSS) follows because
+ * it all references these. The tones are darker here so they keep WCAG AA both as text
+ * on light surfaces and as fills under white ink (--bc-on-tone flips to white).
+ */
+.light {
+  color-scheme: light;
+
+  --bc-bg: #e9edf2;
+  --bc-surface: #ffffff;
+  --bc-surface-inset: #eef2f7;
+  --bc-surface-raised: #e3e9f0;
+  --bc-border: #d3dbe4;
+  --bc-border-strong: #b9c4d0;
+
+  --bc-text: #141d28;
+  --bc-text-muted: #54616f;
+
+  --bc-accent: #0f766e; /* darker teal — AA on white as text and under white ink */
+  --bc-on-accent: #ffffff;
+  --bc-accent-blue: #1f5fb0;
+  --bc-accent-violet: #5b3fc4;
+
+  --bc-tone-success: #15803d;
+  --bc-tone-caution: #8a5a00;
+  --bc-tone-danger: #bf2d24;
+  --bc-tone-neutral: #54616f;
+  --bc-on-tone: #ffffff; /* light tones are dark here, so solid fills take white ink */
+
+  /* Soften elevation for light surfaces (the inset white highlight is invisible here). */
+  --bc-shadow-panel: 0 1px 2px rgb(15 23 42 / 0.06), 0 12px 30px -14px rgb(15 23 42 / 0.18);
+  --bc-shadow-card: 0 1px 2px rgb(15 23 42 / 0.05), 0 6px 16px -12px rgb(15 23 42 / 0.16);
+  --bc-shadow-button: 0 1px 2px rgb(15 23 42 / 0.12);
+
+  /* A faint dark gloss reads better than a white one on light controls. */
+  --bc-gloss: radial-gradient(115% 85% at 50% -10%, rgb(255 255 255 / 0.18), rgb(0 0 0 / 0.04) 80%);
+}

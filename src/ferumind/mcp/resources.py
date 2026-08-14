@@ -6,12 +6,12 @@ rendition — issues ``resources/read`` against the URI ``list_files`` and
 
 Two SDK notes, both deliberate:
 
-* **The read handler is registered at the low level, not through
-  ``@mcp.resource``.** FastMCP's ``ResourceTemplate`` carries a single fixed
+* **The read handler is registered on the low-level server, not through
+  ``@mcp.resource``.** MCPServer's ``ResourceTemplate`` carries a single fixed
   ``mime_type`` for every resource it creates, so a template could only ever
   label a JPEG and a PDF with the same type. Per-file MIME is a hard
-  requirement here, so the low-level handler owns the read. Non-Ferumind URIs
-  fall through to FastMCP so nothing else is broken by the override.
+  requirement here, so this handler owns the read. Non-Ferumind URIs fall
+  through to MCPServer so nothing else is broken by the override.
 * **A template is still registered** so ``resources/templates/list``
   advertises the URI shape to clients that browse it. Concrete resources are
   deliberately *not* enumerated: a project can hold thousands of files, and
@@ -21,28 +21,24 @@ Two SDK notes, both deliberate:
 
 from __future__ import annotations
 
+import base64
 import logging
-import time
 from collections.abc import Iterable
-from typing import cast
 
 from mcp import types
-from mcp.server.fastmcp.server import FastMCP
 from mcp.server.lowlevel.helper_types import ReadResourceContents
-from mcp.shared.exceptions import McpError
-from pydantic import AnyUrl
+from mcp.server.mcpserver import MCPServer
+from mcp.shared.exceptions import MCPError
 
 from ferumind.core.errors import FerumindError
 from ferumind.core.file_reads import FileResourceContent, read_file_resource
 from ferumind.core.file_uri import FILE_URI_PREFIX, parse_file_uri
 from ferumind.core.locks import acquire_project_lock
-from ferumind.core.observations import new_correlation_id, record_mcp_call_observation
 from ferumind.core.paths import PathSafetyError, contained_project_root
 from ferumind.core.types import JsonObject
+from ferumind.mcp.sdk_internals import lowlevel_server
 from ferumind.mcp.tool_context import (
-    current_transport,
     require_config,
-    require_database,
     require_format_gate,
     require_workspace,
     scoped_project,
@@ -51,8 +47,6 @@ from ferumind.mcp.tool_context import (
 logger = logging.getLogger(__name__)
 
 RESOURCE_TEMPLATE_URI = f"{FILE_URI_PREFIX}{{project}}/{{encoded_path}}"
-
-_RESOURCE_TOOL_NAME = "resources/read"
 
 _RESOURCE_TEMPLATE_DESCRIPTION = (
     "The untouched original of a project file. Build the URI from the "
@@ -66,53 +60,46 @@ _RESOURCE_TEMPLATE_DESCRIPTION = (
 )
 
 
-def _record_resource_observation(
-    *,
-    project_key: str | None,
-    ok: bool,
-    error_code: str | None,
-    duration_ms: float,
-    result_bytes: int | None,
-    metrics: JsonObject | None,
-) -> None:
-    """Record a resource read at the same metadata level as a tool call.
-
-    Metadata only — MIME type and byte counts, never the blob itself.
-    Telemetry failures are swallowed so they can never break a read.
-    """
-    try:
-        db = require_database()
-        conn = db.get_connection()
-        try:
-            record_mcp_call_observation(
-                conn,
-                tool_name=_RESOURCE_TOOL_NAME,
-                correlation_id=new_correlation_id(),
-                project_key=project_key,
-                ok=ok,
-                error_code=error_code,
-                transport=current_transport(),
-                argument_keys=["uri"],
-                context_metrics=metrics,
-                duration_ms=duration_ms,
-                result_bytes=result_bytes,
-            )
-        finally:
-            conn.close()
-    except Exception as exc:  # observation must never break a resource read
-        logger.error("Failed to record resource observation (type=%s)", type(exc).__name__)
-
-
-def _resource_error(code: str, message: str, details: JsonObject | None = None) -> McpError:
+def _resource_error(code: str, message: str, details: JsonObject | None = None) -> MCPError:
     """Build a JSON-RPC error carrying the Ferumind error code in ``data``.
 
     ``resources/read`` has no Ferumind envelope, so the machine-readable code
-    rides in the error's structured ``data`` instead.
+    rides in the error's structured ``data`` instead. mcp 2.x takes the fields
+    directly rather than a wrapped ``ErrorData``.
     """
     data: JsonObject = {"error_code": code}
     if details:
         data.update(details)
-    return McpError(types.ErrorData(code=types.INVALID_PARAMS, message=message, data=data))
+    return MCPError(code=types.INVALID_PARAMS, message=message, data=data)
+
+
+def _as_result(uri: str, contents: Iterable[ReadResourceContents]) -> types.ReadResourceResult:
+    """Wrap read-resource carriers in the protocol result mcp 2.x expects.
+
+    The SDK used to do this conversion behind the removed decorator. ``str``
+    content becomes ``TextResourceContents`` and ``bytes`` becomes
+    base64-encoded ``BlobResourceContents``, so the type of the content still
+    decides the wire shape.
+    """
+    blocks: list[types.TextResourceContents | types.BlobResourceContents] = []
+    for item in contents:
+        if isinstance(item.content, bytes):
+            blocks.append(
+                types.BlobResourceContents(
+                    uri=uri,
+                    blob=base64.b64encode(item.content).decode("ascii"),
+                    mime_type=item.mime_type or "application/octet-stream",
+                )
+            )
+        else:
+            blocks.append(
+                types.TextResourceContents(
+                    uri=uri,
+                    text=item.content,
+                    mime_type=item.mime_type or "text/plain",
+                )
+            )
+    return types.ReadResourceResult(contents=blocks)
 
 
 def _contents_for(content: FileResourceContent) -> list[ReadResourceContents]:
@@ -154,7 +141,7 @@ def read_ferumind_file_resource(uri_text: str) -> tuple[list[ReadResourceContent
     return _contents_for(content), metrics
 
 
-def register_file_resources(mcp: FastMCP) -> None:
+def register_file_resources(mcp: MCPServer) -> None:
     """Register the file resource template and the low-level read handler."""
 
     @mcp.resource(
@@ -168,7 +155,7 @@ def register_file_resources(mcp: FastMCP) -> None:
 
         Registered so the URI shape is advertised in
         ``resources/templates/list``. Reads are served by the low-level
-        handler below, which can set the per-file MIME type a FastMCP
+        handler below, which can set the per-file MIME type a MCPServer
         template cannot; this body is the correct fallback if that
         override is ever absent.
         """
@@ -178,59 +165,47 @@ def register_file_resources(mcp: FastMCP) -> None:
         first = contents[0]
         return first.content
 
-    # FastMCP installed its own ReadResourceRequest handler during
-    # construction; registering here replaces it. Private access is required
-    # because FastMCP exposes no public hook for the low-level server.
-    lowlevel = mcp._mcp_server  # pyright: ignore[reportPrivateUsage]
+    async def handle_read_resource(
+        _ctx: object,
+        params: types.ReadResourceRequestParams,
+    ) -> types.ReadResourceResult:
+        """Serve one ``resources/read``, per-file MIME type included.
 
-    @lowlevel.read_resource()
-    async def handle_read_resource(uri: AnyUrl) -> Iterable[ReadResourceContents]:
-        uri_text = str(uri)
+        Registered through the low-level server's public
+        ``add_request_handler``, which replaces the handler ``MCPServer``
+        installed for itself during construction. mcp 2.x removed the
+        decorator form; the handler now takes ``(ctx, params)`` and returns a
+        ``ReadResourceResult`` rather than an iterable of contents.
+
+        Telemetry is not written here: ``CallObservationMiddleware`` observes
+        ``resources/read`` with the same code that observes tool calls.
+        """
+        uri_text = str(params.uri)
         if not uri_text.startswith(FILE_URI_PREFIX):
-            # Not ours: preserve whatever FastMCP would have served.
-            return await mcp.read_resource(uri)
+            # Not ours: preserve whatever MCPServer would have served.
+            contents = await mcp.read_resource(params.uri)
+            if isinstance(contents, types.InputRequiredResult):  # pragma: no cover - unused
+                raise _resource_error(
+                    "UNSUPPORTED_RESOURCE",
+                    "This resource requires client input, which Ferumind does not serve",
+                )
+            return _as_result(uri_text, contents)
 
-        started = time.perf_counter()
-        project_key: str | None = None
         try:
-            project_key = parse_file_uri(uri_text).project_key
-        except FerumindError:
-            project_key = None
-
-        try:
-            contents, metrics = read_ferumind_file_resource(uri_text)
+            contents, _metrics = read_ferumind_file_resource(uri_text)
         except FerumindError as exc:
-            _record_resource_observation(
-                project_key=project_key,
-                ok=False,
-                error_code=exc.code,
-                duration_ms=(time.perf_counter() - started) * 1000.0,
-                result_bytes=None,
-                metrics=None,
-            )
             raise _resource_error(exc.code, str(exc), exc.details) from exc
         except PathSafetyError as exc:
-            _record_resource_observation(
-                project_key=project_key,
-                ok=False,
-                error_code="WORKSPACE_MISMATCH",
-                duration_ms=(time.perf_counter() - started) * 1000.0,
-                result_bytes=None,
-                metrics=None,
-            )
             # Never echo the resolved absolute path back to the client.
             raise _resource_error(
                 "WORKSPACE_MISMATCH",
                 "Resource path is outside the configured workspace boundary",
             ) from exc
 
-        size = cast("int", metrics.get("size_bytes") or 0)
-        _record_resource_observation(
-            project_key=project_key,
-            ok=True,
-            error_code=None,
-            duration_ms=(time.perf_counter() - started) * 1000.0,
-            result_bytes=size,
-            metrics=metrics,
-        )
-        return contents
+        return _as_result(uri_text, contents)
+
+    lowlevel_server(mcp).add_request_handler(
+        "resources/read",
+        types.ReadResourceRequestParams,
+        handle_read_resource,
+    )

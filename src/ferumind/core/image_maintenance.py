@@ -1,6 +1,6 @@
 """Re-run the storage image policy over files already on disk.
 
-Uploads are normalized on the way in (``core.writes``), but a workspace
+Uploads are normalized on the way in (``core.upload_writes``), but a workspace
 predates any given policy and the policy itself is meant to be retuned. This
 module applies the current :class:`~ferumind.core.images.ImagePolicy` to
 existing files so "change the setting and re-run" is a real workflow rather
@@ -34,7 +34,7 @@ from ferumind.core.snapshots import (
     record_snapshot_in_db,
 )
 from ferumind.core.types import DbConnection, StrictModel
-from ferumind.core.writes import upload_metadata_path
+from ferumind.core.write_limits import upload_metadata_path
 
 #: Extensions worth opening. The pipeline still decides what it can actually
 #: handle; this only avoids reading every unrelated byte in the project.

@@ -6,7 +6,9 @@
 
 - `AGENTS.md` — project-level agent instructions
 - `.opencode/commands/` — reusable command definitions
-- `.opencode/skills/*/SKILL.md` — domain-specific skill definitions
+- `.opencode/skills/*/SKILL.md` — repo skill definitions (the agents building
+  Ferumind, not the Ferumind skills served to a chat client; see `AGENTS.md`)
+- `.opencode/agents/*.md` — subagent definitions
 
 ## Generated Configs
 
@@ -15,7 +17,7 @@ Other agent configs are generated from the OpenCode source and are Git-ignored:
 | Agent | Generated Files |
 |-------|----------------|
 | Cursor | `.cursor/rules/*.mdc` |
-| Claude Code | `CLAUDE.md`, `.claude/skills/*/SKILL.md` |
+| Claude Code | `CLAUDE.md`, `.claude/skills/*/SKILL.md`, `.claude/agents/*.md` |
 | Copilot | `.github/copilot-instructions.md`, `.github/instructions/*.md` |
 | Codex | `.codex/README.md` |
 

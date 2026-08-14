@@ -4,22 +4,16 @@ from __future__ import annotations
 
 import os
 import sqlite3
-from pathlib import Path
 
-import pytest
-
-from ferumind.core import reconcile as reconcile_module
 from ferumind.core.documents import compute_sha256
 from ferumind.core.indexer import get_indexed_signature, index_project
 from ferumind.core.operations import get_operation, list_operations
+from ferumind.core.patch_writes import propose_exact_replace_patch
 from ferumind.core.paths import WorkspaceRoot
 from ferumind.core.reconcile import (
     reconcile_document,
     reconcile_project,
-    record_watch_detection,
 )
-from ferumind.core.snapshots import list_snapshots_from_db
-from ferumind.core.writes import propose_exact_replace_patch
 
 
 def _hand_edit(workspace: WorkspaceRoot, project: str, rel: str, extra: str) -> None:
@@ -117,36 +111,3 @@ def test_reconcile_project_catches_new_files(
     drifted = reconcile_project(conn, workspace, project)
     assert drifted == 1
     assert get_indexed_signature(conn, project, "memory/note.md") is not None
-
-
-def test_watch_detection_takes_snapshot(
-    conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
-) -> None:
-    index_project(conn, workspace, project)
-    _hand_edit(workspace, project, "spine.md", "\nwatched edit\n")
-    outcome = record_watch_detection(conn, workspace, project, "spine.md")
-    assert outcome.drifted
-    snapshots = list_snapshots_from_db(conn, project_key=project, target_path="spine.md")
-    assert any(s.reason == "watch_detect" for s in snapshots)
-    watcher_ops = [op for op in list_operations(conn, project, limit=10) if op.source == "watcher"]
-    assert watcher_ops
-
-
-def test_watch_snapshot_failure_does_not_consume_indexed_drift(
-    conn: sqlite3.Connection,
-    workspace: WorkspaceRoot,
-    project: str,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    index_project(conn, workspace, project)
-    _hand_edit(workspace, project, "spine.md", "\nwatched edit\n")
-    indexed_before = get_indexed_signature(conn, project, "spine.md")
-
-    def fail_snapshot(*_args: object, **_kwargs: object) -> Path:
-        raise OSError("injected snapshot failure")
-
-    monkeypatch.setattr(reconcile_module, "create_snapshot", fail_snapshot)
-    with pytest.raises(OSError, match="injected snapshot failure"):
-        record_watch_detection(conn, workspace, project, "spine.md")
-
-    assert get_indexed_signature(conn, project, "spine.md") == indexed_before

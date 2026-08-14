@@ -4,8 +4,12 @@ Every core read that serves content or maps calls into this module. The
 check is a cheap stat (mtime_ns + size) against the index; only on drift
 does it rehash and reindex the file, mark pending proposals bound to the old
 document hash as stale, and write an operation-log entry with
-``source: out-of-band``. The watcher (liveness layer) uses
-:func:`record_watch_detection` to add a snapshot on detect.
+``source: out-of-band``.
+
+This is the *only* mechanism that detects out-of-band edits. There is no
+filesystem watcher: the liveness layer was removed in favour of reconcile-on-read,
+which covers the same edits at the moment they matter (the next read) without a
+supervised background process. See ``product/00-what-is-ferumind.md``.
 """
 
 from __future__ import annotations
@@ -14,7 +18,6 @@ from pathlib import Path, PurePosixPath
 
 from pydantic import BaseModel, ConfigDict
 
-from ferumind.core.documents import compute_sha256
 from ferumind.core.errors import WorkspaceMismatchError
 from ferumind.core.indexer import (
     get_indexed_signature,
@@ -25,12 +28,10 @@ from ferumind.core.indexer import (
 )
 from ferumind.core.operations import (
     SOURCE_OUT_OF_BAND,
-    SOURCE_WATCHER,
     mark_stale_proposals,
     record_operation,
 )
 from ferumind.core.paths import PathSafetyError, contained_path
-from ferumind.core.snapshots import create_snapshot, new_snapshot_id, record_snapshot_in_db
 from ferumind.core.types import DbConnection
 
 
@@ -146,58 +147,3 @@ def reconcile_project(
             if outcome.drifted:
                 drifted += 1
     return drifted
-
-
-def record_watch_detection(
-    conn: DbConnection,
-    workspace_root: Path,
-    project_key: str,
-    path: str,
-) -> ReconcileOutcome:
-    """Watcher path: snapshot-on-detect, then reconcile (reindex + oplog).
-
-    The snapshot captures the on-disk content at detection time so the
-    hand-edit is recoverable even before any agent read happens. Snapshot
-    publication deliberately precedes reconcile: if snapshot creation fails,
-    the indexed signature remains stale and a later watcher pass can retry
-    instead of permanently losing the recovery point.
-    """
-    project_dir = project_dir_for(workspace_root, project_key)
-    try:
-        file_path = contained_path(project_dir, path)
-    except PathSafetyError as exc:
-        raise WorkspaceMismatchError(
-            f"Path {path!r} is outside the asserted project boundary"
-        ) from exc
-    on_disk = stat_signature(file_path)
-    indexed = get_indexed_signature(conn, project_key, path)
-    if on_disk is not None and (
-        indexed is None or (on_disk[0], on_disk[1]) != (indexed[0], indexed[1])
-    ):
-        content = file_path.read_text(encoding="utf-8")
-        if indexed is None or compute_sha256(content) != indexed[2]:
-            snapshot_id = new_snapshot_id()
-            snapshot_dir = create_snapshot(
-                project_dir,
-                project_key=project_key,
-                target_path=path,
-                before_content=content,
-                after_content=None,
-                reason="watch_detect",
-                snapshot_id=snapshot_id,
-            )
-            record_snapshot_in_db(
-                conn,
-                snapshot_id=snapshot_id,
-                project_key=project_key,
-                target_path=path,
-                snapshot_dir=str(snapshot_dir),
-                reason="watch_detect",
-            )
-    return reconcile_document(
-        conn,
-        workspace_root,
-        project_key,
-        path,
-        source=SOURCE_WATCHER,
-    )

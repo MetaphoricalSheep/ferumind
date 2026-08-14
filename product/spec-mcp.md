@@ -1,16 +1,16 @@
-# Spec: MCP Server v2
+# Spec: MCP Server
 
 Status: locked for build · 11 Jul 2026 · implements
 [00-what-is-ferumind.md](00-what-is-ferumind.md) D3, D7, D8, D9, D11, D12, D13.
 Written to be buildable by a coding agent without further product decisions.
 
-This is a **fresh surface**. No compatibility shims with the session-based v1
-tools; the old workspace layout is not served. Migration of old projects is a
-separate later effort (00 §Open).
+This is a **fresh surface**. There are no compatibility shims for the
+session-based tools that preceded it, and no layout other than the current
+one is served.
 
 ## 0. Transport, protocol, statelessness
 
-- Server framework: current FastMCP/MCP SDK stack, local stdio transport,
+- Server framework: the MCP Python SDK's `MCPServer`, local stdio transport,
   launched by `scripts/ferumind-mcp-stdio`. Direct network transports fail
   closed. The tunnel integration may serve a live workspace for an owner
   running it themselves; the OAuth, owner-authorization, and deployment gate
@@ -21,9 +21,9 @@ separate later effort (00 §Open).
   identically if every call arrives on a fresh MCP session (ChatGPT already
   does this).
 - Target MCP protocol semantics: 2026-07-28 revision (no reliance on
-  `Mcp-Session-Id`, no init-time state). Remain compatible with the current
-  SDK; upgrading the SDK is a roadmap item, not a blocker. **Build-start
-  task:** record the SDK and protocol version actually in use in the ticket.
+  `Mcp-Session-Id`, no init-time state). The supported SDK range, the two
+  private attachment points it rests on, and what widening the range requires
+  are in [docs/mcp-sdk-support.md](../docs/mcp-sdk-support.md).
 - `initialize` `instructions` field returns the condensed bootstrap (§9).
 
 ## 1. Scoping
@@ -54,6 +54,7 @@ workspace/
   compacts/                    # workspace-level chat handoff compacts
   system/
     rules/                     # workspace-level rules, *.md, lexical order
+    skills/                    # on-demand Ferumind skills, *.md (D7)
     prompts/bootstrap.md       # canonical bootstrap prompt
     templates/                 # project seed templates (see contract/)
     schemas/
@@ -79,13 +80,14 @@ workspace/
   compacts are not project documents, are not indexed as project documents,
   and never appear in `get_context`.
 
-## 3. Frontmatter v2 (D3)
+## 3. Frontmatter (D3)
 
 ```yaml
 id: doc_…                # existing stable id, server-generated
 type: document           # constant; replaces type: canvas
 project: <key>
 title: <str>
+description: <str>       # required (format 3); what this document is for
 status: active           # active | gated | frozen | archived; default active
 edit_policy: free        # optional: free | append | propose-first | ask-human
 created: <iso>           # server-set
@@ -95,15 +97,29 @@ updated: <iso>           # server-maintained, protected
 - **Protected keys** (existing mechanism, unchanged): `id`, `type`,
   `project`, `created`; `updated` is automatic. `propose_frontmatter_patch`
   refuses them (`FRONTMATTER_PROTECTED`).
+- `description` is **required on every managed document** as of format 3
+  ([spec-versioning.md](spec-versioning.md) §1): a non-empty string of at
+  most 300 characters (`MAX_DESCRIPTION_CHARS`, `core/frontmatter.py`),
+  answering one question — what is this document for? As navigation metadata
+  rather than a summary, an abstract, an ontology, or a keyword dump, it is
+  what makes a `get_context` document map selectable without reading
+  anything, and it surfaces as a typed property on `ParsedDocument`
+  (`core/documents.py`). The key is **not** protected: what a document is for
+  legitimately changes as the document evolves, so it goes through the
+  ordinary `propose_frontmatter_patch` → `apply_patch` flow like `title` or
+  `status`.
 - `edit_policy` **defaults by folder** when the key is absent:
   `canvases/` → `free`, `memory/` → `free`, `inbox/` → `free`,
   `library/` → `propose-first`, `rules/` → `ask-human`,
   `spine.md` → `propose-first`. A log canvas is an ordinary canvas whose
   author sets `edit_policy: append` explicitly.
-- No `gate:`, `cadence:`, `last_run:`, `as_of:` keys in v1. Gate conditions
-  are prose in the document/spine. (Skills machinery is phase 2.)
+- No `gate:`, `cadence:`, `last_run:`, `as_of:` keys today. Gate conditions
+  are prose in the document/spine. Skills ship without any of them: a skill
+  carries `name` and a one-line trigger `description`, and nothing else.
 - Indexer: add `status`, `edit_policy` (resolved, i.e. explicit-or-default),
-  and `folder` columns; `search_project` and `get_context` read them.
+  `folder`, and `description` columns; `search_project` and `get_context`
+  read them. `documents.description` is derived state like the rest of that
+  table — the Markdown is the truth, and `rebuild_index` refills it.
 
 ## 4. `get_context` (D9)
 
@@ -126,11 +142,20 @@ Response:
     "document_sha256": "…"
   },
   "documents": [
-    { "path": "canvases/phase-1.md", "title": "Phase 1", "folder": "canvases",
-      "status": "active", "edit_policy": "free", "updated": "2026-07-10T…" }
+    { "path": "canvases/phase-1.md", "title": "Phase 1",
+      "description": "Week-by-week plan for the first training block, with the lift progressions and the deload rule it is judged against.",
+      "folder": "canvases", "status": "active", "edit_policy": "free",
+      "updated": "2026-07-10T…", "size_bytes": 8140 }
+  ],
+  "skills": [
+    { "name": "distilling-durable-knowledge",
+      "description": "Use when a phase ends, a canvas has bloated, …",
+      "path": "system/skills/distilling-durable-knowledge.md" }
   ],
   "inbox_count": 2,
-  "payload": { "format": 2, "rules_bytes": 4120, "spine_bytes": 6210, "documents_count": 14 }
+  "payload": { "format": 3, "rules_bytes": 4120, "spine_bytes": 6210,
+               "documents_count": 14, "skills_bytes": 354,
+               "descriptions_bytes": 1980 }
 }
 ```
 
@@ -139,15 +164,34 @@ Rules:
 - `rules.content_markdown` is concatenation with source headers — **no
   semantic merging** (D7). Order: `system/rules/*` lexically, then
   `projects/<key>/rules/*` lexically.
+- `skills` is the Ferumind-skill index: `name` plus a one-line trigger
+  `description` per installed skill, **never a body** (D7). An agent whose
+  situation matches a trigger calls `read_skill`. Measured cost: 354 bytes of
+  index against a 4,523-byte body, so the on-demand split saves 4,169 bytes on
+  every call of every chat on every project.
 - `spine` is `null` with `"spine_missing": true` if `spine.md` doesn't exist.
 - `documents` excludes `status: archived` and everything under `archive/`
   and `inbox/` (inbox is a count). Includes `rules/` and `memory/` files —
   the map is complete otherwise.
-- **Uncapped in v1, observed** (decision 11 Jul): no truncation anywhere.
-  The server records `rules_bytes`, `spine_bytes`, `documents_count`, and
-  total result bytes in the observation log on every `get_context` call, and
-  the same numbers are echoed in the `payload` field so they're visible in
-  transcripts. A cap is a later decision made from this data.
+- Each document entry carries `description` (§3) and `size_bytes` — what the
+  document is for and how much it costs to open. Together they are the whole
+  point of the map: an agent picks its target from them instead of reading
+  documents to find out which one it wanted. `size_bytes` is the indexed
+  value already on the `documents` row, not a fresh stat per call.
+- **`list_tree` and `search_project` deliberately do not carry
+  `description`** (decided). `get_context` is the navigation surface, and it
+  already delivers every description once per chat. Those two are
+  enumeration-shaped — a tree listing and a section-hit list, both of which
+  can return many rows per document — so repeating a description per row
+  multiplies payload for no navigation gain.
+- **Uncapped to start, observed** (decision 11 Jul): no truncation anywhere.
+  The server records `rules_bytes`, `spine_bytes`, `documents_count`,
+  `descriptions_bytes`, and total result bytes in the observation log on
+  every `get_context` call, and the same numbers are echoed in the `payload`
+  field so they're visible in transcripts. `descriptions_bytes` is broken out
+  separately because format 3 put a new per-document cost in the contract
+  call, and the whole `MAX_DESCRIPTION_CHARS` bound is a guess until this
+  number says otherwise. A cap is a later decision made from this data.
 
 ## 5. Tool inventory
 
@@ -164,10 +208,10 @@ success). Existing parameter names are **kept verbatim** (`path`,
 | `get_context` | `project` | §4 | |
 | `get_compact_instructions` | — | compacting procedure | explicit `/compact` or Ferumind compact trigger only |
 | `read_document` | `project, path` | content, frontmatter, `document_sha256` | serves every folder incl. rules/memory/archive |
-| `read_document_range` | `project, path, start_line, end_line` | lines + hashes | unchanged |
-| `get_document_map` | `project, path` | section map + hashes | unchanged |
+| `read_document_range` | `project, path, start_line, end_line` | lines + hashes | prefer after section search hits |
+| `get_document_map` | `project, path` | section map + hashes + `size_bytes` per section | derive from reconciled doc, not index; optional after section search; can be large |
 | `find_in_document` | `project, path, query, …` | matches | unchanged |
-| `search_project` | `project, query, folder?, status?, include_archived=false, limit?` | hits with `folder`/`status` per row | new filters |
+| `search_project` | `project, query, folder?, status?, include_archived=false, limit?` | section hits with `folder`/`status`, `section_id`, `heading_*`, `start_line`/`end_line`, `size_bytes`, snippet, score; `limit` counts **sections** | hand ranges to `read_document_range`; skip map when the hit is enough |
 | `list_tree` | `project, folder?` | tree listing | unchanged mechanics; **Markdown only** — non-Markdown files are `list_files` (§5.4) |
 | `list_files` | `project, path_prefix?, query?, mime_type?, extension?, include_markdown=false, include_sidecars=false, limit=100, cursor?` | file entries with path, MIME, size, `resource_uri`, `context_support` | §5.4; generic non-Markdown discovery, walks the project |
 | `read_file` | `project, path, max_image_edge=1024, image_quality=78, text_offset=0, max_text_chars=50000` | typed MCP content: image rendition / bounded text / resource link | §5.4; returns real `ImageContent` + `ResourceLink`, never the original bytes inline |
@@ -176,6 +220,7 @@ success). Existing parameter names are **kept verbatim** (`path`,
 | `list_snapshots` | `project, path?, limit?` | snapshot list | absorbs `list_canvas_snapshots` |
 | `read_snapshot` | `project, snapshot_id` | snapshot metadata, bounded text content, omission flags, and diff | rename of `read_canvas_snapshot` |
 | `list_projects` | — | projects with key/title/status | workspace-level |
+| `read_skill` | `name` | one skill's name, trigger, path, and full body | workspace-level; body never rides in `get_context` |
 | `read_compact` | `token` | compact frontmatter/body/hash status | workspace-level |
 | `list_compacts` | `state?, project?, limit?` | compact metadata only | workspace-level; validates project filter if supplied |
 
@@ -227,11 +272,12 @@ Proposal semantics:
 | Tool | Params | Behavior |
 |---|---|---|
 | `apply_patch` | `project, operation_id` | revalidates binding + guards and the stored replacement's size/hash/Markdown structure; snapshot-before-write; file compensation plus one SQLite commit for snapshot/oplog/proposal terminal state; returns new `document_sha256` for chaining |
-| `create_document` | `project, folder_path, title, content, status?, edit_policy?` | absorbs `create_canvas`; `folder_path` must start with a role folder (else `UNKNOWN_FOLDER`); generates frontmatter; snapshot; oplog |
+| `create_document` | `project, folder_path, title, description, content, status?, edit_policy?` | absorbs `create_canvas`; `folder_path` must start with a role folder (else `UNKNOWN_FOLDER`); generates frontmatter; snapshot; oplog |
 | `capture_note` | `project, text, title?` | writes into `inbox/` (existing mechanics) |
+| `record_episode` | `project, title, summary, related_paths?, related_episode_id?` | appends one `##` section to `memory/episodes/<YYYY-MM>.md`, creating that file (`edit_policy: append`) on first use. Month, date, and `ep_…` id come from **server** time and are not arguments; the append is unguarded by a document hash (concurrent records both append under the project lock). Reconciles before appending; snapshot; oplog. Archived month file → `DOCUMENT_ARCHIVED` with the archived path. No propose/apply step, and no edit or delete path — a correction is a new episode carrying `related_episode_id` |
 | `archive_document` | `project, path` | sets `status: archived` **and** moves to `archive/<original-path>`; snapshot; oplog; returns `archived_path`. Refuses `spine.md` (`CANNOT_ARCHIVE_SPINE`) |
 | `unarchive_document` | `project, archived_path` | reverse: move back to mirror origin, `status: active`; snapshot; oplog. Collision at origin → `PATH_EXISTS` |
-| `restore_snapshot` | `project, snapshot_id` | unchanged |
+| `restore_snapshot` | `project, snapshot_id` | restores only before-content valid under the current document contract; legacy snapshots remain readable but fail closed on restore rather than recreating malformed current-format Markdown |
 | `create_project` | `key, title` | workspace-level; registers in `projects.yml`; seeds `spine.md` + folder skeleton from `system/templates/` (see [contract/](contract/)) |
 | `rebuild_index` | `project?` | unchanged |
 | `create_compact_draft` | `project?, sources?, tags?` | workspace-level; creates `workspace/compacts/compact_<four-word-token>.md` |
@@ -240,7 +286,7 @@ Proposal semantics:
 | `resume_compact` | `token, auto_archive_on_resume=false` | verifies integrity, increments `resume_count`, returns handoff prompt + body |
 | `archive_compact` | `token` | sets compact `state: archived`; no hard delete |
 
-Current surface: **17 read + 12 propose/discard + 17 mutate = 46 tools**,
+Current surface: **18 read + 12 propose/discard + 18 mutate = 48 tools**,
 zero session tools.
 
 ### 5.3a Library file upload (experimental, added post-lock)
@@ -271,7 +317,7 @@ Rationale and constraints:
   of script/executable extensions and allow everything else. Blocked →
   `UNSUPPORTED_FILE_TYPE`.
 - **Size cap.** Decoded payload capped at `MAX_CHUNK_BYTES` (256 KB;
-  `core/writes.py`), not `MAX_UPLOAD_BYTES` — this whole call has to be
+  `core/write_limits.py`), not `MAX_UPLOAD_BYTES` — this whole call has to be
   deliverable in one tool call, and real MCP-client tool-call size
   ceilings (ChatGPT's connector included) turned out to sit far below what
   the wire format alone allows. 10 MB and then 100 MB were both tried
@@ -294,14 +340,15 @@ Rationale and constraints:
   passes in `metadata` are kept verbatim and are the agent's to shape
   (tags, description, source, etc.) — the server does not validate their
   schema.
-- **Known gap: not indexed.** The indexer, `list_tree`, and
-  `search_project` are Markdown-only today (`index_project` walks
-  `*.md`; `parse_document` assumes frontmatter). Uploaded files and their
-  metadata sidecars exist on disk and in the operation/snapshot log, but
-  are invisible to those three read tools until the indexer is extended to
-  cover them. `read_document`/`get_document_map`/`find_in_document` also
-  reject non-`.md` paths with `DOCUMENT_NOT_FOUND` (existing
-  `_read_project_file` suffix check) — expected, not a new restriction.
+- **Not indexed, and that is now the decision.** The indexer, `list_tree`,
+  and `search_project` are Markdown-only (`index_project` walks `*.md`;
+  `parse_document` assumes frontmatter). Uploaded files and their metadata
+  sidecars exist on disk and in the operation/snapshot log but never appear
+  in those three. This began as a gap; §5.4 settled it as intended
+  behaviour, with `list_files` as the discovery surface instead.
+  `read_document`/`get_document_map`/`find_in_document` also reject non-`.md`
+  paths with `DOCUMENT_NOT_FOUND` (existing `_read_project_file` suffix
+  check) — expected, not a new restriction.
 - **Binary snapshot reads are explicit.** Snapshot metadata and the binary
   addition note remain readable, but a side that cannot be decoded as UTF-8
   (or exceeds the Markdown mutation limit) is returned as `null` with its
@@ -367,8 +414,9 @@ Rationale:
   upload bytes at once. Expired staging is removed when that session is
   touched again or when another upload starts in the project.
   `discard_upload` remains the immediate cleanup path. A project with no
-  later upload activity can retain expired partial chunks until the
-  maintenance worker is added, but the reservation limits cap that residue.
+  later upload activity can retain expired partial chunks indefinitely —
+  there is no background sweeper and D13 rules one out — but the reservation
+  limits cap that residue.
 - New error codes: `UPLOAD_INCOMPLETE`, `CONTENT_HASH_MISMATCH` (§7
   addendum below).
 - **Both size caps were lowered after real-world testing, twice.**
@@ -381,9 +429,9 @@ Rationale:
   *assembled* total for a chunked upload, or a §5.3c ChatGPT-fetched file —
   neither of which needs to fit in one call at all).
 
-Total surface with all three experimental additions: **15 read + 12
-propose/discard + 17 mutate = 44 tools**. §5.4 adds the two file tools,
-bringing the current total to 46.
+The upload tools brought the surface to 44. The four additions since — the
+two file tools (§5.4), `record_episode` (§5.3), and `read_skill` (§2) — bring
+the current total to 48, restated in §5.4.
 
 ### 5.3c ChatGPT file-reference upload (experimental, added post-lock)
 
@@ -468,14 +516,14 @@ directly (same object schema, not wrapped in an array):
 
 `files`/`file` must be top-level (nested file params aren't supported by
 the extension) — verified against the real serialized `tools/list` output,
-not just the internal Python object (`core/writes.py`'s `ChatGPTFileInput`
-pydantic model represents optional fields as `anyOf: [string, null]`;
-`mcp/write_tools.py`'s `_pin_chatgpt_file_schema` overwrites the advertised
-schema — `items` on the batch tool, the `file` property itself on the
-single-file tool — with the literal dict above after registration, since
-FastMCP exposes no public API to edit a tool's schema post-registration —
-the same rationale `observation.apply_observation_to_all_tools` already
-relies on for reaching into `_tool_manager`).
+not just the internal Python object (`core/upload_writes.py`'s
+`ChatGPTFileInput` pydantic model represents optional fields as
+`anyOf: [string, null]`; `mcp/upload_tools.py`'s `_pin_chatgpt_file_schema`
+overwrites the advertised schema — `items` on the batch tool, the `file`
+property itself on the single-file tool — with the literal dict above after
+registration, since the SDK exposes no public API to edit a tool's schema
+post-registration — the same rationale `mcp/sdk_internals.py` already relies
+on for reaching into `_tool_manager`).
 
 **Example invocation payload** (what ChatGPT sends):
 
@@ -625,11 +673,11 @@ Rationale and constraints:
 ### 5.4 Generic file discovery and retrieval (experimental, added post-lock)
 
 Added after §5.3a–c: uploads could put a file into a project, but nothing
-could get one back out. §5.3a's "Known gap: not indexed" is the hole this
-section closes — for retrieval. (The indexer, `search_project`, and
-`list_tree` remain Markdown-only; `list_files` walks the project instead of
-reading an index, so it needs no indexer change and sees out-of-band files
-immediately.)
+could get one back out. This section closes that hole for retrieval, and in
+doing so settles §5.3a's not-indexed note as a decision rather than a gap.
+The indexer, `search_project`, and `list_tree` stay Markdown-only;
+`list_files` walks the project instead of reading an index, so it needs no
+indexer change and sees out-of-band files immediately.
 
 Two tiers, deliberately separate:
 
@@ -738,10 +786,10 @@ thousands of files, and enumerating them into a client's resource list is
 not a discovery channel. `list_files` is, with filters and pagination.
 
 **SDK note.** The read handler is registered at the low level rather than
-through FastMCP's `@resource` decorator, because a FastMCP
+through the SDK's `@mcp.resource` decorator, because an `MCPServer`
 `ResourceTemplate` carries a single fixed `mime_type` for every resource it
 creates — it could only ever label a JPEG and a PDF identically. Non-Ferumind
-URIs fall through to FastMCP so nothing else is affected.
+URIs fall through to the SDK so nothing else is affected.
 
 **Size cap.** `MAX_RESOURCE_READ_BYTES` is defined once
 (`core/file_reads.py`) and starts equal to `MAX_UPLOAD_BYTES` (20 MB):
@@ -762,8 +810,8 @@ Both are one-line changes once real host compatibility numbers exist.
   `openai/fileParams` upload path (§5.3c) is unaffected — it moves files
   *into* Ferumind, this section moves them *out*.
 
-Total surface with the file tools: **17 read + 12 propose/discard + 17
-mutate = 46 tools**.
+Total surface with the file tools: **18 read + 12 propose/discard + 18
+mutate = 48 tools**.
 
 ### 5.5 Workspace compacts
 
@@ -777,7 +825,7 @@ global snapshots and operation-logged under reserved project key
 
 Compact filenames are `compacts/compact_{word}-{word}-{word}-{word}.md`.
 On collision the server chooses a different four-word token; no hex suffix is
-appended. Frontmatter is compact-specific, not document v2 frontmatter:
+appended. Frontmatter is compact-specific, not document frontmatter:
 
 ```yaml
 id: word-word-word-word
@@ -794,12 +842,13 @@ document_sha256: null
 
 After finalization, `state` becomes `finalized` and the body begins with a `## Handoff Prompt` block
 containing the exact prompt subsequent chats must follow, then the compact
-summary sections. Compacts are list/read/resume only in v1: no compact search
-and no inclusion in project context.
+summary sections. Compacts are list/read/resume only: no compact search and
+no inclusion in project context.
 
 ## 6. Out-of-band edits (D12)
 
-Hand-edits on disk are first-class. Two mechanisms:
+Hand-edits on disk are first-class. One mechanism does the work; the second
+is kept below as a struck-out record of what was removed and why:
 
 1. **Reconcile-on-read (correctness floor).** Every read that serves content
    or maps (`get_context`, `read_document`, `read_document_range`,
@@ -810,19 +859,17 @@ Hand-edits on disk are first-class. Two mechanisms:
    `PATCH_CONFLICT` with `reason: "out-of-band-edit"`), (c) writes an oplog
    entry `source: out-of-band`. The mtime check must be cheap enough to run
    on every read (stat only; hash only on drift).
-2. **Watcher (liveness).** The existing watchdog worker, in watch mode,
-   debounces filesystem events per file (coalesce window: 5 s of quiet, max
-   one snapshot per file per 60 s) and takes a **snapshot-on-detect** plus
-   reindex + oplog entry. Snapshot publication precedes reconciliation so a
-   snapshot failure cannot consume the indexed drift signature. Known
-   transient filesystem/database failures are requeued, snapshot rate-limit
-   reservations are released on failure, and both pending-event and
-   rate-limit maps are bounded. Watcher failure modes (server down during edit,
-   synced mounts, rename-based saves, event overflow) are covered by (1).
+2. ~~**Watcher (liveness).**~~ **Removed 2026-08-06.** The design specified a
+   debounced snapshot-on-detect watcher as a second, liveness-oriented
+   mechanism. It was never wired into a lifecycle, and operational evidence
+   (4 out-of-band operations in 2,241 over ~4 weeks, all caught by (1)) did
+   not justify supervising a background process to cover a weekly event. (1)
+   is now the only detection mechanism. See 00 D12 for the recorded decision
+   and the accepted trade-off.
 
 ## 7. Errors
 
-Envelope unchanged. Full v2 code list:
+Full error code list:
 
 Boundary fallback: `INTERNAL_ERROR` is returned with a correlation id when
 an unexpected exception reaches the MCP boundary. The exception message and
@@ -880,7 +927,7 @@ in that error's structured `data` as `error_code`, alongside the same
   initialize metadata when the transport exposes it; "Not exposed"
   otherwise), `transport`, `result_bytes`, `duration_ms`.
 - `get_context` calls additionally record `rules_bytes`, `spine_bytes`,
-  `documents_count` (§4 telemetry).
+  `documents_count`, `skills_bytes`, and `descriptions_bytes` (§4 telemetry).
 - `list_files` records `count`, `scanned_count`, `has_more`. `read_file`
   records `representation`, `context_support`, and the original vs
   rendition `mime_type`/`size_bytes`/dimensions — so a host's real payload
@@ -905,33 +952,44 @@ in that error's structured `data` as `error_code`, alongside the same
   snippets.
 - Redaction rules unchanged: metadata only, never content, secrets →
   `[redacted]`.
-- The v1 session code (mcp/session tools, `core/sessions.py`, and session
-  plumbing in writes/operations) was removed with the
-  12 Jul fresh-space cleanup along with the rest of the v1 implementation;
-  v2 code must never reintroduce it.
+- The session code (mcp/session tools, `core/sessions.py`, and session
+  plumbing in writes/operations) went with the 12 Jul fresh-space cleanup,
+  along with the rest of the preceding implementation. It must never be
+  reintroduced.
 
 ## 9. `initialize` instructions (condensed bootstrap)
 
-Exact string:
+Exact string, held against `INSTRUCTIONS` in `mcp/server.py` by
+`test_spec_states_the_exact_initialize_instructions`:
 
-> Ferumind is the user's shared Markdown workspace and the source of truth
-> across chats. If the user explicitly invokes `/compact`, `@ferumind
-> /compact`, or asks for a Ferumind compact, call `get_compact_instructions`.
-> If the user invokes `/resume <token>` or asks to resume a Ferumind compact,
-> call `resume_compact`. For project work, call `get_context` with your
-> project key before anything else, and obey the rules it returns. Never use
-> compacts for ordinary project memory, notes, summaries, or document
-> updates. Propose-then-apply for every edit; a propose result is not a saved
-> edit. A project also holds non-Markdown files (photographs, PDFs,
-> exports). They are not in get_context and not searchable by content. To
-> work with one: read the project's rules, spine, and documents first — they
-> carry the workspace's own conventions and often reference files by path;
-> call `list_files` when you do not already know the path; call `read_file`
-> to put a supported representation (image rendition or bounded text) into
-> context; and use the `resource_uri` it returns when you need the exact
-> original. There is no required folder for files, and a file's meaning
-> never follows from its folder, filename, or extension alone — read the
-> documents that reference it.
+> Ferumind is the user's shared Markdown workspace and the source of
+> truth across chats. If the user explicitly invokes `/compact`,
+> `@ferumind /compact`, or asks for a Ferumind compact, call
+> `get_compact_instructions`. If the user invokes `/resume <token>` or
+> asks to resume a Ferumind compact, call `resume_compact`. For project
+> work, call `get_context` with your project key before anything else,
+> and obey the rules it returns. Never use compacts for ordinary project
+> memory, notes, summaries, or document updates. Propose-then-apply for
+> every edit; a propose result is not a saved edit. Every tool answers
+> with the same envelope: `ok` true means read `data`, `ok` false means
+> read `error_code`. Each `propose_*` call stages a pending edit and
+> writes nothing — save it with `apply_patch`, drop it with
+> `discard_patch`, and note that it expires after 24 hours. A project
+> also holds non-Markdown files (photographs, PDFs, exports). They are
+> not in get_context and not searchable by content. To work with one:
+> read the project's rules, spine, and documents first — they carry the
+> workspace's own conventions and often reference files by path; call
+> `list_files` when you do not already know the path; call `read_file`
+> to put a supported representation (image rendition or bounded text)
+> into context; and use the `resource_uri` it returns when you need the
+> exact original. There is no required folder for files, and a file's
+> meaning never follows from its folder, filename, or extension alone —
+> read the documents that reference it.
+
+The envelope and propose-then-apply sentences are here rather than repeated
+across 48 tool descriptions: guidance identical across a tool family ships
+once in `instructions`, where it costs one copy instead of one per entry in
+`tools/list`.
 
 The file paragraph is deliberately about *how to find and read* files, not
 about what any file means. Binary files are **never** part of `get_context`:
@@ -942,7 +1000,7 @@ prevent.
 ## 10. Acceptance criteria
 
 1. A fresh chat needs exactly one call (`get_context`) to receive rules +
-   spine + map; no tool requires any prior call except `apply_patch`
+   spine + map + skill index; no tool requires any prior call except `apply_patch`
    (requires a `propose_*`) — verified by an integration test that calls
    every tool cold.
 2. Every scoped tool rejects missing/unknown `project` with the right code.
@@ -954,7 +1012,7 @@ prevent.
    default search.
 5. No tool result ever contains a session id; grep-level check that
    `session_id` is gone from `src/ferumind/mcp/`.
-6. Observation log rows for `get_context` carry the three payload metrics.
+6. Observation log rows for `get_context` carry the five payload metrics.
 7. All path handling passes the existing adversarial path/symlink test
    suite under the new layout.
 8. (§5.4) An agent with no prior knowledge of a project's file layout can

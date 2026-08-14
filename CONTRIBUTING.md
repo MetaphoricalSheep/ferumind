@@ -12,13 +12,15 @@ just bootstrap
 just verify
 ```
 
-Python 3.12 or newer and `uv` are required. The locked v2 product contract is
-in `product/`; where implementation and `product/spec-mcp.md` disagree, the
-specification wins.
+`uv` and one of the supported interpreters are required; the range and the
+guards that keep it honest are in [docs/python-support.md](docs/python-support.md).
+The locked product contract is in `product/`; where implementation and
+`product/spec-mcp.md` disagree, the specification wins.
 
 ## Pull requests
 
-- Keep core behavior in `ferumind.core`; MCP, CLI, and workers call core.
+- Keep core behavior in `ferumind.core`; the MCP, CLI, and dashboard layers
+  call core rather than reimplementing it.
 - Add deterministic success and failure tests, including adversarial tests
   for paths, files, network inputs, and concurrency where relevant.
 - Do not add untyped public APIs, unjustified `Any`, broad exception

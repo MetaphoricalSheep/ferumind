@@ -11,31 +11,55 @@ rollback, and SQLite-backed indexing/search/operation logs.
 
 ## Product status
 
-This repository is **Ferumind v2**. The locked product design lives in
+Ferumind is alpha software. The locked product design lives in
 `product/` ([00-what-is-ferumind.md](product/00-what-is-ferumind.md) and the
 specs beside it); where existing code conflicts with
 [product/spec-mcp.md](product/spec-mcp.md), **the spec wins**.
 
-V2 was rebuilt from the specs in [product/roadmap.md](product/roadmap.md).
-Superseded implementation details are not part of the repository.
+The current implementation was rebuilt from the specs in
+[product/roadmap.md](product/roadmap.md). Superseded implementation details
+are not part of the repository. The package is at 0.1.0 and has never shipped
+a 1.0.
+
+Three version numbers move independently and never line up: the workspace
+`format` (3), the database `schema` / `PRAGMA user_version` (3), and the
+package semver (0.1.0). Name the axis whenever a number could be mistaken for
+another one; `v` is reserved for git release tags. See
+[product/spec-versioning.md](product/spec-versioning.md) §0.1.
 
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────┐
 │                     Interface Layer                  │
-│          MCP Server  │  CLI (Typer)                 │
+│     MCP Server  │  CLI (Typer)  │  Local Dashboard  │
 ├─────────────────────────────────────────────────────┤
 │                    Core Domain                       │
 │  paths  │  config  │  registry  │  documents          │
 │  context  │  policy  │  frontmatter  │  search         │
 │  indexer  │  snapshots  │  operations  │  security    │
-│  reconcile  │  format  │  locks  │  writes            │
-├─────────────────────────────────────────────────────┤
-│  Workers (index/watch, backup, maintenance)          │
-│  — mechanical only: no LLM, no judgment              │
+│  reconcile  │  format  │  locks  │  migrate           │
+│  write_common  │  write_limits  │  patch_writes       │
+│  document_writes  │  upload_writes                    │
+│  lifecycle_writes  │  project_writes                  │
+│  skills  │  compacts  │  lint  │  verify_index        │
+│  files  │  file_reads  │  images  │  renditions       │
+│  observations  │  diagnostics  │  runtime events        │
 └─────────────────────────────────────────────────────┘
 ```
+
+The block names the domains, not every module; `src/ferumind/core/` is the
+inventory.
+
+The write domain is five modules, not one: guarded propose → apply in
+`patch_writes`, creation and capture in `document_writes`, `library/` bytes
+in `upload_writes`, archive/restore in `lifecycle_writes`, and project
+creation in `project_writes`. `write_common` holds the guards they share and
+`write_limits` the bounds; both are leaves. There is no `core/writes.py`.
+
+There is no workers layer. The filesystem watcher and backup worker were
+removed: out-of-band edits are covered by reconcile-on-read, and no background
+process is supervised.
 
 There is no sessions module and no agents layer: the server is stateless per
 call, and "knowledge agents" are procedures executed by whichever chat agent
@@ -44,8 +68,7 @@ is connected (product D13).
 ### Core principles
 
 - Core logic belongs in `ferumind.core`.
-- MCP, CLI, and workers must call core; they must not duplicate safety
-  logic.
+- MCP and CLI must call core; they must not duplicate safety logic.
 - Documents carry the intelligence; the server is a librarian: it protects,
   indexes, and assembles context — it never decides behavior.
 - The workspace is live user data and must remain ignored by Git.
@@ -61,7 +84,7 @@ ferumind/
   AGENTS.md              ← This file — committed agent instructions
   README.md
   pyproject.toml
-  product/               ← Locked v2 design: identity, specs, contract, roadmap
+  product/               ← Locked design: identity, specs, contract, roadmap
   .opencode/             ← Committed OpenCode config (source of truth)
   .githooks/             ← Git hooks (pre-commit, pre-push)
   scripts/               ← Bash and Python scripts
@@ -69,7 +92,7 @@ ferumind/
     core/                ← Domain logic (typed, tested, no framework leakage)
     mcp/                 ← MCP server
     cli/                 ← Typer CLI
-    workers/             ← Mechanical background workers
+    dashboard/           ← Loopback API and packaged static operator UI
     db/                  ← SQLite schema and migrations
   tests/
     unit/                ← Unit tests
@@ -79,19 +102,48 @@ ferumind/
   workspace/             ← Live user data (Git-ignored)
 ```
 
+### "Skill" means two different things — ask which one
+
+The word is overloaded and the two mechanisms share nothing: not a location, not a
+delivery path, not an audience.
+
+| | **Repo skills** | **Ferumind skills** |
+|---|---|---|
+| Location | `.opencode/skills/<name>/SKILL.md` | `product/contract/skills/`, installed to `workspace/system/skills/` |
+| Audience | Agents **building** Ferumind — you, in this repo | Agents **using** Ferumind — a chat client through MCP |
+| Delivery | `scripts/sync_agent_configs.py` copies them to `.claude/`, `.cursor/`, `.codex/`, `.github/` at build time. No server involved | `get_context.skills` carries name + one-line trigger; `read_skill` fetches the body on demand |
+| Examples | `mcp-hardening`, `test-fix`, `python-principal-engineer` | `distilling-durable-knowledge` |
+| Status | Six exist and work | Triggers and index work; due-ness (cadence, `last_run`) is deliberately deferred |
+
+Ferumind skills are the same kind of thing as workspace **rules** — behavior text
+the server hands a connected agent — and differ only in being fetched on demand
+rather than concatenated into every `get_context` call.
+
+**If a request says "skill" and the intended one is not obvious from context, ask.**
+Do not infer it from a grep: `.opencode/skills/` and `core/skills.py` both answer to
+the word and mean opposite things. Adding a workspace procedure to
+`.opencode/skills/` passes `just verify` and silently never reaches a chat agent.
+
+When writing docs, tickets, or commit messages, say **"repo skill"** or **"Ferumind
+skill"** whenever a bare "skill" could be read either way.
+
 ## Development Commands
 
 | Command | Action |
 |---------|--------|
 | `just setup` | Install all dependencies |
 | `just format` | Format code |
-| `just lint` | Lint code |
+| `just lint` | Lint the repository with Ruff (not the workspace lint) |
 | `just typecheck` | Type check |
 | `just test` | Run tests |
 | `just test-cov` | Tests with coverage |
+| `just smoke` | Run the stdio smoke harness alone |
+| `just retrieval-report` | Print the retrieval metric table |
 | `just verify` | Full verification pipeline |
 | `just sync-agents` | Sync agent configs |
 | `just bootstrap` | Init workspace |
+| `just dashboard` | Run the loopback-only operator dashboard |
+| `just sync-basecoat <path>` | Refresh vendored Basecoat CSS from a local checkout |
 | `just cli -- --help` | Run the CLI |
 | `just project-list` | List projects across registry/folder/database |
 | `just project-delete <key>` | Clean stale registry/DB state after its folder is gone |
@@ -107,12 +159,22 @@ ferumind/
 | `scripts/verify.sh` | Full verification pipeline |
 | `uv run python scripts/sync_agent_configs.py` | Sync agent configs |
 | `uv run python scripts/bootstrap_workspace.py` | Init workspace |
+| `uv run ferumind dashboard` | Run the loopback-only operator dashboard |
 | `uv run ferumind` | Run the CLI |
-| `scripts/install-hooks.sh` | Install git hooks |
+| `uv run ferumind lint` | Report mechanical workspace findings; never edits Markdown |
+| `just install-hooks` / `scripts/install-hooks.sh` | Install git hooks |
+
+`just --list` is the complete recipe inventory; the table above is the subset
+worth knowing by heart.
 
 ## Coding Standards
 
-- Modern Python 3.12+
+- Python 3.12-3.14. Ruff and Pyright target the **floor** (3.12), so
+  newer-than-3.12 syntax or stdlib fails static checks before it can fail at
+  runtime. Changing the supported range means changing `requires-python`, the
+  classifiers, the CI matrix, and the README together — guards in
+  `tests/unit/test_release_controls.py` fail otherwise. See
+  [docs/python-support.md](docs/python-support.md).
 - Strong typing everywhere
 - `src/` layout
 - Small cohesive modules, no god files
@@ -162,7 +224,37 @@ ferumind/
 - Operation log: every mutation recorded
 - No writing through user-controlled paths without canonicalization
 
-## MCP Design Principles (v2 — product/spec-mcp.md is the full spec)
+## Dashboard design system: Basecoat
+
+Basecoat is Ferumind's dashboard design system. It owns the dashboard's visual
+language; Ferumind continues to own architecture, security, privacy, data
+boundaries, and product behavior.
+
+- Use Basecoat semantic tokens for dashboard color and state. Dashboard components
+  must not hard-code state hues or reach past semantic tokens into the primitive
+  palette.
+- Express state through Basecoat's `success`, `caution`, `danger`, and `neutral`
+  tone system (plus the primary accent). Meaning must never depend on color alone.
+- Reuse the vendored Basecoat components and patterns before inventing alternatives,
+  including Panel, StatTile, StatusCard, StatusDot, LiveStatusDot, Chip, and Progress
+  when semantically appropriate. Ferumind-specific tables, charts, and layouts may
+  compose those primitives.
+- A reusable visual pattern belongs upstream in Basecoat rather than as a generic
+  clone inside Ferumind. Keep local CSS specific to the operator dashboard.
+- Every dashboard change must meet WCAG 2.2 AA: semantic HTML, keyboard-operable
+  controls, visible focus, sufficient contrast, reduced-motion support, and
+  non-color status cues.
+- The dashboard intentionally loads the theme from vendored package CSS and works
+  offline. Do not add the Basecoat Tier 1 CDN runtime, Tailwind/Alpine CDN assets, a
+  frontend build step, or Node as a Ferumind runtime requirement.
+- The pinned Basecoat commit is recorded in
+  `src/ferumind/dashboard/static/basecoat/REVISION`. Refresh the exact committed CSS
+  with `just sync-basecoat /path/to/basecoat`; never hand-edit vendored CSS.
+- Ferumind's Ruff, Pyright, Pytest, and repository verification pipeline remain
+  authoritative. Basecoat's TypeScript tooling does not apply to this Python/static
+  consumer.
+
+## MCP Design Principles (product/spec-mcp.md is the full spec)
 
 - **Stateless per call.** There are no sessions, no `session_id`, and no
   model-carried state except a short-lived patch `operation_id`. The server
@@ -172,7 +264,8 @@ ferumind/
   `PROJECT_REQUIRED`; unknown → `PROJECT_NOT_FOUND`. The project is the hard
   write boundary.
 - `get_context` is the contract call: merged workspace + project rules, the
-  spine, and the document map — uncapped, with payload-size telemetry.
+  spine, the document map, the Ferumind-skill index (name plus trigger, never
+  a body), and the inbox count — uncapped, with payload-size telemetry.
 - **Folder = role.** A document's role derives from its path (`spine.md`,
   `rules/`, `canvases/`, `memory/`, `library/`, `inbox/`, `archive/`). No
   `role:` frontmatter key. Behavioral frontmatter is `status`
@@ -190,40 +283,65 @@ ferumind/
   (`DOCUMENT_ARCHIVED`), protected frontmatter identity keys
   (`FRONTMATTER_PROTECTED`), out-of-project paths (`WORKSPACE_MISMATCH`).
 - Out-of-band disk edits are first-class: reads reconcile (reindex, stale
-  pending proposals, operation-log entry `source: out-of-band`); the watcher
-  snapshots on detect. Hash guards make conflicting applies fail closed.
+  pending proposals, operation-log entry `source: out-of-band`). This is the
+  only detection mechanism; there is no watcher. Hash guards make conflicting
+  applies fail closed.
 - Tool input schemas must be strict. No raw path writes; all paths resolve
   through the core path validator. All writes are snapshot-protected.
 - Tool responses must be structured; errors must be machine-readable codes.
   No silent partial success. No hard delete (`archive_document` /
   `unarchive_document` instead).
+- **Every tool advertises an `outputSchema`.** Tools declare
+  `-> Annotated[CallToolResult, FerumindResult[Payload]]`; the SDK derives the
+  schema from that metadata type and returns the hand-built result verbatim.
+  Never pass `structured_output` — it short-circuits derivation and silently
+  strips the schema. The schema covers success *and* failure arms, because the
+  SDK validates `structuredContent` on `isError` results too. Result shape
+  belongs in the schema; a tool's description says when to call it and what
+  the result means, never a second copy of the field list. See the
+  `mcp-tool-contracts` skill.
 - Tool names are stable snake_case; the server namespace is Ferumind.
 - The workspace format is versioned (`workspace/system/meta.yml`,
-  `format: 2`; product/spec-versioning.md is the full spec). Writes against
+  `format: 3`; product/spec-versioning.md is the full spec). Writes against
   a mismatched format fail with `FORMAT_UNSUPPORTED`; migration is explicit
   (`ferumind migrate`), never implicit. The MCP surface itself is not
   wire-versioned: additive within a format, breaking changes ride a format
-  bump with a migrator in the same change. DB schema changes go through
-  numbered migrations in `db/migrations/` (`PRAGMA user_version`) — never
-  ad-hoc `ALTER` calls.
+  bump with migration proven in the same work unit. Migrators normally ship;
+  an explicit single-owner/single-workspace decision may instead authorize
+  tested, evidenced, untracked one-shot tooling that is deleted before
+  landing. DB schema changes go through numbered migrations in
+  `db/migrations/` (`PRAGMA user_version`) — never ad-hoc `ALTER` calls.
 
 ### Tool annotation taxonomy
 
 Three categories ("read-only" means: does not mutate user Markdown; internal
-observation-log metadata writes are allowed):
+observation-log metadata writes are allowed). Every registered tool appears
+below, and `test_agents_md_classifies_every_registered_tool` fails when one
+does not:
 
-- **Read-only** (`readOnlyHint=true`, `idempotentHint=true`): `get_context`,
-  `read_document`, `read_document_range`, `get_document_map`,
-  `find_in_document`, `search_project`, `list_tree`, `list_files`,
-  `read_file`, `list_pending_patches`, `operation_log`, `list_snapshots`,
-  `read_snapshot`, `list_projects`.
-- **Proposal / pending-edit** (`readOnlyHint=true`, `idempotentHint=false`):
-  the `propose_*` family and `discard_patch` — they stage guarded diffs as
-  pending operation records, never writing user Markdown.
+- **Read-only** (`readOnlyHint=true`, `idempotentHint=true`):
+  `find_in_document`, `get_compact_instructions`, `get_context`,
+  `get_document_map`, `list_compacts`, `list_files`, `list_pending_patches`,
+  `list_projects`, `list_snapshots`, `list_tree`, `operation_log`,
+  `read_compact`, `read_document`, `read_document_range`, `read_file`,
+  `read_skill`, `read_snapshot`, `search_project`.
+- **Staging** (`readOnlyHint=true`, `idempotentHint=false`):
+  `append_upload_chunk`, `discard_patch`, `discard_upload`,
+  `propose_exact_replace_patch`, `propose_frontmatter_patch`,
+  `propose_insert_patch`, `propose_multi_edit_patch`, `propose_patch`,
+  `propose_range_patch`, `propose_search_replace_patch`,
+  `propose_section_patch`, `start_library_file_upload`. The `propose_*` family
+  stages guarded diffs as pending operation records; the chunked-upload tools
+  stage bytes against a pending `upload_id`. Neither writes user Markdown, and
+  both expire after 24 h.
 - **Content-mutating** (`readOnlyHint=false`, `idempotentHint=false`):
-  `apply_patch`, `create_document`, `capture_note`, `archive_document`,
-  `unarchive_document`, `restore_snapshot`, `create_project`,
-  `rebuild_index`.
+  `append_compact_chunk`, `apply_patch`, `archive_compact`,
+  `archive_document`, `capture_note`, `create_compact_draft`,
+  `create_document`, `create_project`, `finalize_compact`,
+  `finalize_library_file_upload`, `rebuild_index`, `record_episode`,
+  `restore_snapshot`, `resume_compact`, `unarchive_document`,
+  `upload_library_file`, `upload_library_file_from_chatgpt`,
+  `upload_library_files_from_chatgpt`.
 
 ## Non-Markdown files (spec-mcp §5.4)
 
@@ -267,23 +385,38 @@ client metadata when exposed by the transport, ok/error, duration, result
 size, and argument keys. It records metadata only — never document content,
 patch bodies, or argument values. Redaction replaces secrets/tokens with
 `[redacted]`; unavailable client metadata remains null and is never guessed.
-The current stdio-only build does not expose an HTTP activity page. Do not
-store operation ids or any tool bookkeeping in Markdown documents.
+Exceptional and lifecycle events use the private metadata-only JSONL stream at
+`.ferumind/logs/ferumind.jsonl`; exception messages, traceback text, locals,
+arguments, and payloads are forbidden there. The separate operator dashboard
+is read-only, loopback-only, never part of the MCP tunnel, and uses the same
+core diagnostic/query layer as the CLI. Do not store operation ids or any tool
+bookkeeping in Markdown documents.
+
+## Derived index maintenance
+
+Run `ferumind verify-index` from time to time, by judgement — not on every
+commit, and not as part of `just verify`, the pre-commit hook, or CI. Default
+mode is read-only: report the summary back to the owner. `--fix` rebuilds
+derived index rows only and never writes Markdown; against the live workspace
+it needs the owner's say-so.
 
 ## Lookup-first editing
 
 Agents must not patch large Markdown bodies when a narrower target is
-available. Preferred order:
+available. Walk only as far as needed — never `read_document` first:
 
-1. `search_project`
-2. `get_document_map`
-3. `find_in_document` or `read_document_range`
-4. `propose_exact_replace_patch` (preferred: exact multi-line old/new text),
+1. `search_project` — section hits carry `start_line`/`end_line`
+2. `read_document_range` on a hit (skip `get_document_map` when the hit
+   is enough)
+3. `get_document_map` only when broader structure is genuinely useful; it
+   can be large on long documents
+4. `find_in_document` when you need an exact string inside a known document
+5. `propose_exact_replace_patch` (preferred: exact multi-line old/new text),
    or `propose_multi_edit_patch` for several edits to one document
-5. `propose_section_patch`, `propose_range_patch`,
+6. `propose_section_patch`, `propose_range_patch`,
    `propose_search_replace_patch`, or `propose_insert_patch` for positional
    edits
-6. `apply_patch`
+7. `apply_patch`
 
 Frontmatter/metadata changes go through `propose_frontmatter_patch` (identity
 keys `id`/`type`/`project`/`created` and the automatic `updated` are
@@ -347,7 +480,7 @@ nonexistent paths.
 - Unsafe path joins — never use `str(path).startswith(str(root))` for
   containment checks; always use `is_under_root()` from `ferumind.core.paths`
 - Hard delete for user knowledge content
-- Reintroducing session state or `session_id` parameters (removed v1 concepts)
+- Reintroducing session state or `session_id` parameters (removed in the rebuild)
 - Using `Any` without written justification
 - Using `# type: ignore` without written justification
 - Committing SQLite/DB files

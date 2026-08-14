@@ -22,17 +22,21 @@ metadata:
 - Operation log for every mutation
 - Restore path for every mutation
 
-## Forbidden path-security patterns
+## Ways containment checks fail
 
-- Never use string prefix checks such as `str(path).startswith(str(root))` for containment.
-- Never use naive string replacement to normalize paths.
-- Never trust user-supplied paths.
-- Never join user input directly to workspace/project roots without validation.
-- Never resolve only the candidate path while leaving the root unresolved.
-- Never allow absolute paths where the API expects project-relative paths.
-- Never follow symlinks without validating the final resolved path remains inside the allowed root.
-- All containment checks must go through the central `is_under_root()` helper in `ferumind.core.paths`.
-- Any change to path validation requires adversarial tests.
+The rules above say what to do. These are the specific wrong implementations,
+each of which looks correct and passes an ordinary test:
+
+- `str(path).startswith(str(root))` — admits the sibling `/tmp/root-evil` for
+  the root `/tmp/root`.
+- Normalizing by string replacement, which cannot see what the filesystem
+  would resolve.
+- Resolving the candidate but not the root, so a symlinked root compares
+  against a path that no longer matches it.
+
+Every containment check goes through `is_under_root()` in
+`ferumind.core.paths`, and any change to path validation ships with
+adversarial tests.
 
 ## Safety Flow
 
@@ -50,10 +54,17 @@ metadata:
 
 Prefer the narrowest safe edit target over replacing a whole Markdown body.
 
-- Look up before editing: `get_document_map` → `find_in_document` /
-  `read_document_range` → a granular `propose_*` tool → `apply_patch`.
+- Look up before editing: `search_project` → `read_document_range` on the
+  hit's range → a granular `propose_*` tool → `apply_patch`. Call
+  `get_document_map` only when broader structure is still needed (it can be
+  large). Prefer `find_in_document` for an exact string in a known document.
+  `read_document` is the expensive fallback.
 - Line numbers alone are never sufficient. Every section/range/line/match edit
-  must carry both a `document_before_sha256` and a `target_before_sha256`.
+  is guarded by two hashes: the caller supplies `expected_document_sha256` plus
+  a target hash (`expected_section_sha256` / `expected_range_sha256` /
+  `expected_anchor_sha256`, or `expected_match_count`), and the proposal echoes
+  back what it actually matched as `document_before_sha256` and
+  `target_before_sha256`.
 - Propose-time mismatches fail with `DOCUMENT_HASH_MISMATCH` /
   `TARGET_HASH_MISMATCH`; apply re-checks the document hash and fails with
   `PATCH_CONFLICT`. There is no best-effort overwrite.

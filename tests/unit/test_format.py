@@ -17,16 +17,17 @@ from ferumind.core.format import (
 from ferumind.core.paths import WorkspaceRoot
 
 
-def test_bootstrap_workspace_carries_format_2(workspace: WorkspaceRoot) -> None:
-    assert read_format(workspace) == SUPPORTED_FORMAT == 2
+def test_bootstrap_workspace_carries_current_format(workspace: WorkspaceRoot) -> None:
+    assert read_format(workspace) == SUPPORTED_FORMAT == 3
 
 
 def test_write_format_marker_preserves_created(workspace: WorkspaceRoot) -> None:
     original = meta_path(workspace).read_text(encoding="utf-8")
     created_line = next(line for line in original.splitlines() if line.startswith("created:"))
-    write_format_marker(workspace, 3)
+    replacement_format = SUPPORTED_FORMAT + 1
+    write_format_marker(workspace, replacement_format)
     updated = meta_path(workspace).read_text(encoding="utf-8")
-    assert "format: 3" in updated
+    assert f"format: {replacement_format}" in updated
     assert created_line in updated
 
 
@@ -51,12 +52,20 @@ def test_gate_older_format_allows_reads_refuses_writes(workspace: WorkspaceRoot)
         gate.check_write()
 
 
-def test_gate_missing_marker_treated_as_older(workspace: WorkspaceRoot) -> None:
+def test_gate_missing_marker_refuses_writes_without_inventing_a_format(
+    workspace: WorkspaceRoot,
+) -> None:
+    """Reads stay open, writes are refused, and no format number is fabricated."""
     meta_path(workspace).unlink()
     gate = FormatGate(workspace)
     gate.check_read()
-    with pytest.raises(FormatUnsupportedError):
+    with pytest.raises(FormatUnsupportedError) as excinfo:
         gate.check_write()
+    message = str(excinfo.value)
+    assert "not an initialized Ferumind workspace" in message
+    assert "bootstrap_workspace.py" in message
+    assert "format 1" not in message
+    assert "ferumind migrate" not in message
 
 
 def test_gate_newer_format_refuses_everything(workspace: WorkspaceRoot) -> None:

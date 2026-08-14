@@ -21,23 +21,16 @@ This includes:
 * a branch needing final validation before completion
 * a failed CI or local verification run needing diagnosis
 
-This is not a feature implementation skill.
+This is not a feature implementation skill. Diagnose failures, apply the
+smallest safe fixes, and escalate rather than exercising judgment about
+architecture, product behavior, security, schema, or dependencies.
 
-## Mission
+## Verification command
 
-Run the Ferumind verification suite, diagnose failures, apply the smallest safe fixes, and escalate when the fix requires architecture, product behavior, security, schema, dependency, or implementation judgment.
-
-## Preferred verification command
-
-just verify
-
-This is the preferred entrypoint because it matches the repo's documented developer workflow.
-
-## Canonical verification command
-
-scripts/verify.sh
-
-A task is not complete until the full verification pipeline exits successfully.
+`just verify` is the entrypoint — it is what the repo's developer workflow
+documents. `scripts/verify.sh` is the same pipeline without `just`, for
+environments that lack it. A task is not complete until one of them exits
+successfully.
 
 ## Required loop
 
@@ -86,7 +79,7 @@ Follow AGENTS.md.
 Important constraints:
 
 * Core logic belongs in ferumind.core.
-* CLI, MCP, workers, and agents must call core logic instead of duplicating it.
+* The CLI, MCP, and dashboard layers must call core logic instead of duplicating it.
 * Use pathlib, not os.path.
 * Public functions need explicit parameter and return types.
 * Path-security code requires adversarial tests.

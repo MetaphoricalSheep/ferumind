@@ -35,6 +35,29 @@ test:
 test-cov:
     uv run pytest --cov=src/ferumind --cov-report=term-missing
 
+# Drive a real MCP server over real stdio (tests/smoke). See docs/smoke-harness.md.
+smoke:
+    uv run pytest -m smoke --no-cov
+
+# Run everything except the stdio smoke harness.
+test-no-smoke:
+    uv run pytest -m "not smoke"
+
+# Print the retrieval metric table. See docs/retrieval-harness.md.
+# Assertion mode already rides in pytest; this is the before/after a retrieval
+# ticket pastes into its own evidence.
+retrieval-report:
+    uv run python scripts/retrieval_report.py
+
+# Re-record retrieval-baseline.json. Only ever tightens; refuses on a regression.
+retrieval-update:
+    uv run python scripts/retrieval_report.py --update
+
+# Intentional corpus replacement: re-record after fixtures/labels change.
+# Old and new numbers are not comparable. Does not launder same-corpus regressions.
+retrieval-update-corpus:
+    uv run python scripts/retrieval_report.py --update --accept-corpus-change
+
 # Run the full verification pipeline.
 verify:
     scripts/verify.sh
@@ -47,6 +70,10 @@ bootstrap *args='':
 sync-agents:
     uv run python scripts/sync_agent_configs.py --force
 
+# Refresh vendored Basecoat dashboard CSS from a clean local checkout.
+sync-basecoat source:
+    uv run python scripts/sync_basecoat_theme.py --source {{source}}
+
 # Regenerate a specific agent target: just sync-agent-target cursor
 sync-agent-target target:
     uv run python scripts/sync_agent_configs.py --force --target {{target}}
@@ -54,6 +81,10 @@ sync-agent-target target:
 # Run the Ferumind CLI with optional arguments.
 cli *args='':
     uv run ferumind {{args}}
+
+# Start the read-only operator dashboard on the loopback interface.
+dashboard *args='':
+    uv run ferumind dashboard {{args}}
 
 # Reseal a hand-edited workspace compact after deliberate edits.
 compact-reseal token:

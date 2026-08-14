@@ -1,0 +1,702 @@
+{
+  "_comment": "Recorded complexity debt. Managed by scripts/complexity_ratchet.py; regenerate with --update, which only ever tightens. Entries are keyed by (rule, function) so a behaviour-preserving move between modules is free, while a copy raises the count and fails.",
+  "scan_root": "src",
+  "budgets": {
+    "C901": 10,
+    "PLR0911": 6,
+    "PLR0912": 12,
+    "PLR0913": 5,
+    "PLR0915": 50
+  },
+  "total": 86,
+  "entries": [
+    {
+      "rule": "C901",
+      "function": "_read_verified_snapshot_side",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/reads.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "_validate_full_mode_frontmatter",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "apply_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "compress_image_for_storage",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/images.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "contained_path",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/paths.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "create_project",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/project_writes.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "derive_blocks",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/document_map.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "fetch_remote_file",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/remote_fetch.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "list_compacts",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/compacts.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "list_project_files",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/files.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "load_registry",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/registry.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "prepare_search_replace_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patches.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "register_compact_tools",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/compact_tools.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "register_propose_tools",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/propose_tools.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "register_read_tools",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/read_tools.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "render_image_context",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/renditions.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "restore_snapshot",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/lifecycle_writes.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "run_migration",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/migrate.py"
+      ]
+    },
+    {
+      "rule": "C901",
+      "function": "start_library_file_upload",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/upload_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0911",
+      "function": "compress_image_for_storage",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/images.py"
+      ]
+    },
+    {
+      "rule": "PLR0911",
+      "function": "webp_is_lossless",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/images.py"
+      ]
+    },
+    {
+      "rule": "PLR0912",
+      "function": "_read_verified_snapshot_side",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/reads.py"
+      ]
+    },
+    {
+      "rule": "PLR0912",
+      "function": "apply_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0912",
+      "function": "compress_image_for_storage",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/images.py"
+      ]
+    },
+    {
+      "rule": "PLR0912",
+      "function": "create_project",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/project_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0912",
+      "function": "derive_blocks",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/document_map.py"
+      ]
+    },
+    {
+      "rule": "PLR0912",
+      "function": "fetch_remote_file",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/remote_fetch.py"
+      ]
+    },
+    {
+      "rule": "PLR0912",
+      "function": "render_image_context",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/renditions.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "ToolRegistrar.tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/protocols.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "_apply_one",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/image_maintenance.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "_iter_line_matches",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/edit_targets.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "_read_verified_snapshot_side",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/reads.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "_record_compact_mutation",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/compacts.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "_register_chunked_upload_tools.start_library_file_upload_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/upload_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "_register_direct_upload_tool.upload_library_file_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/upload_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "_update_sidecar",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/image_maintenance.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "_write_new_document",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/document_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "_write_uploaded_file",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/upload_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "append_upload_chunk",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/upload_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "compress_images",
+      "count": 1,
+      "modules": [
+        "src/ferumind/cli/main.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "create_binary_replacement_snapshot",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/snapshots.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "create_document",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/document_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "create_global_snapshot",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/snapshots.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "create_snapshot",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/snapshots.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "create_upload_snapshot",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/snapshots.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "fetch_remote_file",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/remote_fetch.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "finalize_compact",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/compacts.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "find_equivalent_pending_proposal",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/operations.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "find_in_document",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/edit_targets.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "list_project_files",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/files.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "prepare_search_replace_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patches.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "propose_exact_replace_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "propose_frontmatter_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "propose_insert_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "propose_multi_edit_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "propose_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "propose_range_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "propose_search_replace_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "propose_section_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "read_document_range",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/document_map.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "read_file_for_context",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/file_reads.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "record_mcp_call_observation",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/observations.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "record_operation",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/operations.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "record_proposal",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/operations.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "record_snapshot_in_db",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/snapshots.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "register_document_tools.create_document_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/document_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "register_file_tools.list_files_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/file_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "register_file_tools.read_file_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/file_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "register_propose_tools.propose_exact_replace_patch_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/propose_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "register_propose_tools.propose_range_patch_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/propose_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "register_propose_tools.propose_search_replace_patch_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/propose_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "register_propose_tools.propose_section_patch_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/propose_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "register_read_tools.find_in_document_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/read_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "register_read_tools.search_project_tool",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/read_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "run_migration",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/migrate.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "search_project",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/search.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "start_library_file_upload",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/upload_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "upload_library_file",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/upload_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "upload_library_file_from_chatgpt",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/upload_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0913",
+      "function": "upload_library_files_from_chatgpt",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/upload_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0915",
+      "function": "apply_patch",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/patch_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0915",
+      "function": "create_project",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/project_writes.py"
+      ]
+    },
+    {
+      "rule": "PLR0915",
+      "function": "register_compact_tools",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/compact_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0915",
+      "function": "register_propose_tools",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/propose_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0915",
+      "function": "register_read_tools",
+      "count": 1,
+      "modules": [
+        "src/ferumind/mcp/read_tools.py"
+      ]
+    },
+    {
+      "rule": "PLR0915",
+      "function": "render_image_context",
+      "count": 1,
+      "modules": [
+        "src/ferumind/core/renditions.py"
+      ]
+    }
+  ]
+}

@@ -12,7 +12,7 @@ from ferumind.core.config import load_config
 from ferumind.core.documents import parse_document_content
 from ferumind.core.errors import ERROR_CODES, FerumindError, PatchConflictError
 from ferumind.core.file_io import atomic_write_text
-from ferumind.core.frontmatter import generate_frontmatter
+from ferumind.core.frontmatter import FrontmatterBehavior, generate_frontmatter
 from ferumind.core.policy import FROZEN_NOTE, POLICY_NOTES, policy_echo_for
 from ferumind.mcp.models import (
     apply_state_fields,
@@ -23,6 +23,7 @@ from ferumind.mcp.models import (
     read_only_annotations,
     write_annotations,
 )
+from tests.conftest import TEST_DESCRIPTION
 
 
 class TestConfig:
@@ -50,6 +51,44 @@ class TestConfig:
         with pytest.raises(PydanticValidationError):
             load_config()
 
+    def test_resource_ceiling_defaults_to_the_tunnel_limit(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("FERUMIND_MAX_RESOURCE_MB", raising=False)
+        assert load_config().max_resource_response_bytes == 10 * 1024 * 1024
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("10", 10 * 1024 * 1024),
+            ("4", 4 * 1024 * 1024),
+            ("0.5", 512 * 1024),  # fractions keep the 64 KiB floor reachable
+            (" 2 ", 2 * 1024 * 1024),
+        ],
+    )
+    def test_resource_ceiling_converts_megabytes_to_bytes(
+        self, monkeypatch: pytest.MonkeyPatch, value: str, expected: int
+    ) -> None:
+        monkeypatch.setenv("FERUMIND_MAX_RESOURCE_MB", value)
+        assert load_config().max_resource_response_bytes == expected
+
+    @pytest.mark.parametrize("value", ["", "ten", "0", "-1", "nan", "inf"])
+    def test_resource_ceiling_rejects_unusable_values(
+        self, monkeypatch: pytest.MonkeyPatch, value: str
+    ) -> None:
+        """An empty value means unset; everything else here must fail loudly.
+
+        ``0`` in particular must not fall through to the default: a caller
+        writing it means to forbid something, and silently serving 10 MiB
+        instead is the opposite of that intent.
+        """
+        monkeypatch.setenv("FERUMIND_MAX_RESOURCE_MB", value)
+        if value == "":
+            assert load_config().max_resource_response_bytes == 10 * 1024 * 1024
+            return
+        with pytest.raises(ValueError, match="FERUMIND_MAX_RESOURCE_MB"):
+            load_config()
+
 
 def test_atomic_write_creates_private_parent_and_file(tmp_path: Path) -> None:
     target = tmp_path / "nested" / "value.txt"
@@ -61,7 +100,11 @@ def test_atomic_write_creates_private_parent_and_file(tmp_path: Path) -> None:
 class TestPolicyEcho:
     def _doc(self, *, status: str = "active", edit_policy: str | None = None):
         fm = generate_frontmatter(
-            doc_id="doc_x", project_key="demo", title="T", status=status, edit_policy=edit_policy
+            description=TEST_DESCRIPTION,
+            doc_id="doc_x",
+            project_key="demo",
+            title="T",
+            behavior=FrontmatterBehavior(status=status, edit_policy=edit_policy),
         )
         return parse_document_content(fm + "body\n", project_key="demo", path="canvases/x.md")
 
@@ -84,18 +127,18 @@ class TestPolicyEcho:
 class TestEnvelope:
     def test_make_success_shapes_content_and_structured(self) -> None:
         result = make_success({"x": 1}, project="demo")
-        assert result.isError is False
-        assert result.structuredContent == {"ok": True, "data": {"x": 1}, "project": "demo"}
+        assert result.is_error is False
+        assert result.structured_content == {"ok": True, "data": {"x": 1}, "project": "demo"}
         text = result.content[0]
         payload = json.loads(getattr(text, "text"))  # noqa: B009
         assert payload["ok"] is True
 
     def test_make_error_carries_code_and_details(self) -> None:
         result = make_error("PATCH_CONFLICT", "boom", {"reason": "out-of-band-edit"})
-        assert result.isError is True
-        assert result.structuredContent is not None
-        assert result.structuredContent["error_code"] == "PATCH_CONFLICT"
-        assert result.structuredContent["details"] == {"reason": "out-of-band-edit"}
+        assert result.is_error is True
+        assert result.structured_content is not None
+        assert result.structured_content["error_code"] == "PATCH_CONFLICT"
+        assert result.structured_content["details"] == {"reason": "out-of-band-edit"}
 
     def test_state_fields(self) -> None:
         pending = proposal_state_fields("op_1", project="demo")
@@ -109,14 +152,14 @@ class TestEnvelope:
 
     def test_annotation_taxonomy(self) -> None:
         read = read_only_annotations()
-        assert read.readOnlyHint is True
-        assert read.idempotentHint is True
+        assert read.read_only_hint is True
+        assert read.idempotent_hint is True
         proposal = proposal_annotations()
-        assert proposal.readOnlyHint is True
-        assert proposal.idempotentHint is False
+        assert proposal.read_only_hint is True
+        assert proposal.idempotent_hint is False
         write = write_annotations()
-        assert write.readOnlyHint is False
-        assert write.idempotentHint is False
+        assert write.read_only_hint is False
+        assert write.idempotent_hint is False
 
 
 class TestErrors:

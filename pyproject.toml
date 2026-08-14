@@ -5,8 +5,12 @@ build-backend = "hatchling.build"
 [project]
 name = "ferumind"
 version = "0.1.0"
-description = "Local-first, Markdown-backed knowledge workspace for AI agents"
-requires-python = ">=3.12"
+description = "A Markdown memory for your AI chats, running on your own machine"
+# Upper bound is deliberate: every allowed minor is exercised in CI.
+# Raising it means adding that minor to the CI matrix in the same change —
+# tests/unit/test_release_controls.py::test_supported_python_range_matches_ci
+# fails otherwise. See docs/python-support.md.
+requires-python = ">=3.12,<3.15"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -18,6 +22,7 @@ classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
   "Typing :: Typed",
 ]
 
@@ -25,8 +30,20 @@ dependencies = [
   "pydantic>=2.0,<3",
   "typer>=0.12,<1",
   "rich>=13.0,<16",
-  "watchfiles>=0.24,<2",
-  "mcp[cli]>=1.28.1,<2",
+  # Capped to the tested majors. 1.x is in security-only maintenance upstream,
+  # so Ferumind moved to 2.x (REL-035). Two private SDK attachment points
+  # remain — ``_lowlevel_server`` (custom stdio transport, resources/read
+  # handler) and ``_tool_manager`` (to reach its public accessors) — and they
+  # carry no compatibility guarantee, so an untested major can break startup,
+  # result conversion, or the tool boundary. Widen only against a run of the
+  # full surface suite on the new version; the guard in
+  # tests/unit/test_mcp_hardening.py fails if this drifts, and the CI
+  # compatibility matrix derives its rows from this specifier, so widening it
+  # widens the matrix. See docs/mcp-sdk-support.md.
+  # Declared without the `cli` extra: it adds only typer, which is already a
+  # direct dependency above, and python-dotenv, which nothing imports —
+  # scripts/ferumind-mcp-stdio loads env files in the shell before exec.
+  "mcp>=2.0.0,<3",
   "pyyaml>=6.0,<7",
   "httpx>=0.27,<1",
   "regex>=2024.11.6,<2027",
@@ -42,6 +59,10 @@ dev = [
   "pyright>=1.1,<2",
   "types-pyyaml>=6.0,<7",
   "pip-audit>=2.9,<3",
+  # PEP 440 comparison for scripts/mcp_matrix_versions.py. Already present as a
+  # transitive dependency, declared directly because a script depends on it:
+  # hand-rolled version ordering gets 2.10.0 vs 2.9.0 wrong.
+  "packaging>=24.0,<27",
 ]
 
 [project.urls]
@@ -131,6 +152,9 @@ exclude = [
 testpaths = ["tests"]
 strict_markers = true
 strict_config = true
+markers = [
+  "smoke: real-subprocess MCP smoke harness over stdio (tests/smoke); see docs/smoke-harness.md",
+]
 addopts = [
   "--strict-markers",
   "--tb=short",

@@ -1,9 +1,9 @@
--- Ferumind SQLite schema (workspace format 2 baseline).
+-- Ferumind SQLite schema (database schema 3 baseline).
 --
 -- Two table roles (product/spec-versioning.md §2.1):
 --
 --   Derived index — rebuildable from Markdown at any time via rebuild_index:
---     documents, search_index (FTS5 mirror).
+--     documents, search_index, section_index (FTS5 mirrors).
 --
 --   Durable system history — not rebuildable, migrated with care:
 --     operations (audit + pending proposals), snapshots (registry),
@@ -19,6 +19,10 @@ PRAGMA busy_timeout = 5000;
 
 -- ── Derived index ────────────────────────────────────────────────────────────
 
+-- description is the format-3 navigation summary served beside size_bytes.
+-- It is empty only for Markdown without managed-document identity frontmatter.
+-- Keep the column immediately before the table constraint: SQLite places an
+-- ALTER TABLE ADD COLUMN there, so fresh and migrated table DDL converge.
 CREATE TABLE IF NOT EXISTS documents (
     project_key TEXT NOT NULL,
     path TEXT NOT NULL,
@@ -34,6 +38,7 @@ CREATE TABLE IF NOT EXISTS documents (
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL,
     indexed_at TEXT NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
     PRIMARY KEY (project_key, path)
 );
 
@@ -48,6 +53,31 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
     body,
     project_key UNINDEXED,
     path UNINDEXED,
+    tokenize = 'porter unicode61'
+);
+
+-- Section-level FTS5 mirror: one row per derived Markdown section, refreshed
+-- with its document (delete + insert keyed by project_key/path). Sections come
+-- from core.document_map.derive_sections -- the same parser get_document_map
+-- and the patch resolver use -- so an indexed line range is the range an edit
+-- resolves against. title/heading/body are separate indexed columns so bm25()
+-- can weight a heading match above the same term buried in prose; RET-03
+-- chooses the weights. Everything else is UNINDEXED metadata for the reader.
+CREATE VIRTUAL TABLE IF NOT EXISTS section_index USING fts5(
+    title,
+    heading,
+    body,
+    project_key UNINDEXED,
+    path UNINDEXED,
+    section_id UNINDEXED,
+    kind UNINDEXED,
+    heading_text UNINDEXED,
+    heading_path_json UNINDEXED,
+    level UNINDEXED,
+    start_line UNINDEXED,
+    end_line UNINDEXED,
+    content_sha256 UNINDEXED,
+    size_bytes UNINDEXED,
     tokenize = 'porter unicode61'
 );
 
@@ -119,3 +149,6 @@ CREATE INDEX IF NOT EXISTS idx_mcp_call_observations_created_at
 
 CREATE INDEX IF NOT EXISTS idx_mcp_call_observations_tool_name
     ON mcp_call_observations(tool_name);
+
+CREATE INDEX IF NOT EXISTS idx_mcp_call_observations_correlation_id
+    ON mcp_call_observations(correlation_id);

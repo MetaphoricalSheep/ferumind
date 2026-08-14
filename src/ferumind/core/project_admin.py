@@ -19,12 +19,26 @@ from ferumind.core.registry import load_registry, remove_registry_entry, validat
 from ferumind.core.types import DbConnection
 
 #: Tables carrying a ``project_key`` column, cleaned up on project delete.
+#: ``section_index`` is derived state added by RET-02; omitting it left orphan
+#: section rows behind that only ``verify-index`` would ever notice.
 _PROJECT_KEY_TABLES: tuple[str, ...] = (
     "documents",
     "search_index",
+    "section_index",
     "operations",
     "snapshots",
     "mcp_call_observations",
+)
+
+#: Tables whose rows are evidence a project actually exists.
+#:
+#: The observation log is deliberately excluded. It records *attempted* calls,
+#: including ones rejected with ``PROJECT_NOT_FOUND``, so a mistyped or probed
+#: key would otherwise appear in ``project list`` as a phantom project forever
+#: — which is indistinguishable, to a reader, from a real project whose folder
+#: went missing.
+_PROJECT_EXISTENCE_TABLES: tuple[str, ...] = tuple(
+    table for table in _PROJECT_KEY_TABLES if table != "mcp_call_observations"
 )
 
 
@@ -57,7 +71,7 @@ def list_all_projects(conn: DbConnection, workspace: WorkspaceRoot) -> list[Proj
     )
 
     db_keys: set[str] = set()
-    for table in _PROJECT_KEY_TABLES:
+    for table in _PROJECT_EXISTENCE_TABLES:
         # S608: table names come only from the closed constant above.
         rows = conn.execute(
             f"SELECT DISTINCT project_key FROM {table}"  # noqa: S608

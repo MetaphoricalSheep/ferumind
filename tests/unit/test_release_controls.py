@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+import re
+import subprocess
+import tomllib
+from collections.abc import Iterable
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import pytest
 import yaml
@@ -11,6 +15,7 @@ from check_public_tree import (
     action_pin_violations,
     forbidden_public_path_reason,
     forbidden_tracked_paths,
+    tracked_paths,
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -94,19 +99,38 @@ def test_justfile_does_not_globally_load_tunnel_secrets() -> None:
 
 
 def test_tunnel_just_documentation_does_not_forward_a_literal_separator() -> None:
+    """``just tunnel`` takes its flags directly; a ``--`` separator reaches the script.
+
+    Anchored to the command text rather than to the table row that currently
+    carries it, so the recipe table can be restructured without a false failure.
+    """
     instructions = (REPO_ROOT / "AGENTS.md").read_text(encoding="utf-8")
     assert "just tunnel -- --" not in instructions
-    assert "| `just tunnel --init` |" in instructions
+    assert "`just tunnel --init`" in instructions
 
 
 def test_publication_docs_do_not_overstate_current_tree_check() -> None:
-    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-    security = (REPO_ROOT / "SECURITY.md").read_text(encoding="utf-8")
-    for document in (readme, security):
-        normalized = " ".join(document.split())
-        assert "file contents" in normalized
-        assert "Git history" in normalized
-        assert "necessary" in normalized
+    """Both documents must qualify the public-tree check in the same sentence.
+
+    Previously three keywords anywhere in the file satisfied this, so a
+    rewrite that dropped the qualification entirely could still pass as long
+    as "necessary" survived elsewhere. The claim is one sentence; assert that
+    sentence.
+    """
+    for name in ("README.md", "SECURITY.md"):
+        normalized = " ".join((REPO_ROOT / name).read_text(encoding="utf-8").split())
+        sentences = [s for s in normalized.split(". ") if "public-tree" in s]
+        assert sentences, f"{name} no longer describes the public-tree check"
+        claim = sentences[0]
+        limits = f"{name} must say the check inspects neither file contents nor Git history, in the sentence that introduces it. Got: {claim!r}"
+        assert "file contents" in claim, limits
+        assert "Git history" in claim, limits
+
+        qualified = (
+            f"{name} must not present the public-tree check as approval to publish. Got: {claim!r}"
+        )
+        assert "not" in claim, qualified
+        assert "necessary" in claim or "sufficient" in claim, qualified
 
 
 def test_test_fixer_agent_permissions_are_machine_readable_and_fail_closed() -> None:
@@ -149,3 +173,232 @@ def test_verifier_and_ci_run_release_checks() -> None:
     workflow = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "scripts/check_public_tree.py" in verifier
     assert "scripts/check_distribution.py" in workflow
+
+
+# ── Python support range ────────────────────────────────────────────────────
+#
+# Six places declare a Python version and every one of them can drift
+# independently. These tests are the single enforcement point: change
+# ``requires-python`` without touching CI (or vice versa) and the suite fails
+# with the exact fix. See docs/python-support.md for the policy.
+
+
+def _pyproject() -> dict[str, object]:
+    with (REPO_ROOT / "pyproject.toml").open("rb") as handle:
+        return tomllib.load(handle)
+
+
+def _supported_minors() -> list[int]:
+    """The 3.x minors allowed by ``requires-python``, as an explicit list.
+
+    Requires both a lower and an upper bound. An open-ended ``>=3.12`` would
+    silently claim support for every future Python, which is precisely the
+    drift REL-007 closed.
+    """
+    project = cast("dict[str, object]", _pyproject()["project"])
+    spec = cast("str", project["requires-python"])
+    lower: int | None = None
+    upper: int | None = None
+    for clause in (part.strip() for part in spec.split(",")):
+        if clause.startswith(">="):
+            lower = int(clause.removeprefix(">=").split(".")[1])
+        elif clause.startswith("<"):
+            upper = int(clause.removeprefix("<").split(".")[1])
+    assert lower is not None, f"requires-python {spec!r} needs a >= lower bound"
+    assert upper is not None, (
+        f"requires-python {spec!r} needs a < upper bound. An unbounded range claims "
+        "support for Python versions that have never been tested."
+    )
+    return list(range(lower, upper))
+
+
+def _ci_matrix_minors() -> list[int]:
+    workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    jobs = cast("dict[str, Any]", workflow["jobs"])
+    versions = cast("list[str]", jobs["verify"]["strategy"]["matrix"]["python-version"])
+    return [int(version.split(".")[1]) for version in versions]
+
+
+def test_supported_python_range_matches_ci() -> None:
+    """Every interpreter the package accepts is actually exercised."""
+    supported = _supported_minors()
+    tested = _ci_matrix_minors()
+    assert sorted(tested) == sorted(supported), (
+        f"requires-python allows 3.{supported} but CI tests 3.{tested}. "
+        "Add the missing minor to the ci.yml matrix, or narrow requires-python. "
+        "Never advertise an interpreter no job runs."
+    )
+
+
+def test_supported_python_range_matches_classifiers() -> None:
+    project = cast("dict[str, object]", _pyproject()["project"])
+    classifiers = cast("list[str]", project["classifiers"])
+    prefix = "Programming Language :: Python :: 3."
+    declared = sorted(
+        int(item.removeprefix(prefix)) for item in classifiers if item.startswith(prefix)
+    )
+    assert declared == sorted(_supported_minors()), (
+        f"classifiers declare 3.{declared} but requires-python allows "
+        f"3.{sorted(_supported_minors())}."
+    )
+
+
+def test_linters_target_the_oldest_supported_python() -> None:
+    """Ruff and Pyright must target the floor, not the newest interpreter.
+
+    Targeting the newest would let 3.14-only syntax or stdlib pass review and
+    then fail at runtime on 3.12 — which CI would catch only after the fact,
+    and only if that code path happened to be covered.
+    """
+    data = _pyproject()
+    tool = cast("dict[str, Any]", data["tool"])
+    floor = min(_supported_minors())
+    assert tool["ruff"]["target-version"] == f"py3{floor}", (
+        f"ruff target-version must be py3{floor} (the oldest supported minor)."
+    )
+    assert tool["pyright"]["pythonVersion"] == f"3.{floor}", (
+        f"pyright pythonVersion must be 3.{floor} (the oldest supported minor)."
+    )
+
+
+def test_readme_states_the_real_supported_range() -> None:
+    readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
+    minors = _supported_minors()
+    expected = f"3.{min(minors)}-3.{max(minors)}"
+    assert expected in readme, (
+        f"README must state the supported range as {expected!r}. An open "
+        '"3.12+" implies support for untested future interpreters.'
+    )
+
+
+#: An open-ended Python claim: "3.12+", "3.12 or newer", "3.12 and above".
+#: The README guard above only watches one file, so CONTRIBUTING.md carried
+#: "Python 3.12 or newer" — a support claim for interpreters no job runs —
+#: from the day the upper bound was introduced until REL-037 found it.
+_OPEN_ENDED_PYTHON = re.compile(
+    r"[Pp]ython\s+3\.\d+\s*(?:\+|or newer|or later|or above|and above|and newer)"
+)
+
+
+def test_no_tracked_document_claims_an_open_ended_python_range() -> None:
+    """``requires-python`` has an upper bound; prose must not contradict it.
+
+    Any tracked Markdown may restate the range. Rather than listing the files
+    that are allowed to, this refuses the shape that is always wrong: a floor
+    with no ceiling.
+    """
+    tracked = subprocess.run(
+        ["git", "ls-files", "*.md"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        check=True,
+    ).stdout.split()
+
+    offenders: list[str] = []
+    for relative in tracked:
+        if relative.startswith(("workspace/", "tests/fixtures/")):
+            continue
+        text = (REPO_ROOT / relative).read_text(encoding="utf-8")
+        for match in _OPEN_ENDED_PYTHON.finditer(text):
+            line = text.count("\n", 0, match.start()) + 1
+            offenders.append(f"{relative}:{line}: {match.group(0)!r}")
+
+    minors = _supported_minors()
+    assert not offenders, (
+        "These documents claim support for untested future interpreters. State "
+        f"the range as 3.{min(minors)}-3.{max(minors)}, or defer to "
+        "docs/python-support.md:\n  " + "\n  ".join(offenders)
+    )
+
+
+# ── Bare version labels ─────────────────────────────────────────────────────
+#
+# Three numbers version this project and they never line up: the workspace
+# ``format`` (3), the DB ``schema`` / ``PRAGMA user_version`` (3), and the
+# package semver (0.1.0). A bare "v2" belongs to none of them, so nothing
+# proves it wrong when it goes stale — which is how the repository ended up
+# announcing itself as its own second major version at package 0.1.0.
+# Name the axis instead. See product/spec-versioning.md §0.1.
+
+#: A bare label: ``v`` + digits that is neither part of a larger token nor a
+#: dotted version. Deliberately blind to ``garden-v2`` (an identifier),
+#: ``v1.txt`` (a filename), ``checkout@v7`` (an action pin), and ``v0.2.0``
+#: (a git release tag) — those carry an axis already.
+_BARE_VERSION_LABEL = re.compile(r"(?<![\w.@/-])[vV](\d+)(?![\d.])")
+
+#: External dependencies whose own major version is legitimately a bare
+#: label. Ferumind's axes never appear here.
+_EXTERNAL_VERSION_LABEL = re.compile(r"Pydantic\s+v\d+")
+
+_PROSE_SUFFIXES = frozenset({".md", ".py", ".sql", ".toml", ".yml", ".yaml"})
+
+#: This module states the counterexamples the rule forbids, so it cannot be
+#: subject to its own rule. It is the only exemption, and it is asserted
+#: below rather than hidden inside the collector.
+_GUARD_DEFINITION = "tests/unit/test_release_controls.py"
+
+
+def bare_version_labels(text: str) -> tuple[str, ...]:
+    """Return the axis-less version labels in *text*."""
+    return tuple(
+        match.group(0)
+        for match in _BARE_VERSION_LABEL.finditer(_EXTERNAL_VERSION_LABEL.sub("", text))
+    )
+
+
+def bare_version_label_violations(root: Path, paths: Iterable[str]) -> tuple[str, ...]:
+    """Return ``path:line: label`` for every bare label in the given files."""
+    violations: list[str] = []
+    for relative in paths:
+        path = root / relative
+        if path.suffix.lower() not in _PROSE_SUFFIXES or not path.is_file():
+            continue
+        for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
+            violations.extend(
+                f"{relative}:{number}: bare version label {label!r}"
+                for label in bare_version_labels(line)
+            )
+    return tuple(violations)
+
+
+@pytest.mark.parametrize(
+    ("text", "flagged"),
+    [
+        ("# Spec: MCP Server v2", True),
+        ("the v1 implementation", True),
+        ("Frontmatter V2 keys", True),
+        ("the format 2 layout", False),
+        ("schema 2 / PRAGMA user_version", False),
+        ("git tag v0.2.0", False),
+        ("project key garden-v2", False),
+        ("library/v1.txt", False),
+        ("uses: actions/checkout@v7", False),
+        ("Use Pydantic v2 for config", False),
+    ],
+)
+def test_bare_version_label_detection(text: str, flagged: bool) -> None:
+    assert bool(bare_version_labels(text)) is flagged
+
+
+def test_tracked_prose_carries_no_bare_version_labels() -> None:
+    tracked = tracked_paths(REPO_ROOT)
+    assert _GUARD_DEFINITION in tracked, (
+        f"{_GUARD_DEFINITION} is exempt but no longer tracked under that name; "
+        "a renamed guard would exempt nothing and flag its own counterexamples."
+    )
+    scanned = tuple(path for path in tracked if path != _GUARD_DEFINITION)
+    assert bare_version_label_violations(REPO_ROOT, scanned) == ()
+
+
+def test_bare_version_label_guard_catches_injected_drift(tmp_path: Path) -> None:
+    (tmp_path / "spec.md").write_text("# Spec: MCP Server v2\n", encoding="utf-8")
+    (tmp_path / "core.py").write_text('"""Parsing for the v2 layout."""\n', encoding="utf-8")
+    (tmp_path / "notes.rst").write_text("v2 everywhere\n", encoding="utf-8")
+
+    violations = bare_version_label_violations(tmp_path, ("spec.md", "core.py", "notes.rst"))
+
+    assert violations == (
+        "spec.md:1: bare version label 'v2'",
+        "core.py:1: bare version label 'v2'",
+    )

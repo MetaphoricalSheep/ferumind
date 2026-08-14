@@ -1,7 +1,7 @@
 """Chunked-upload staging: per-file, per-chunk scratch storage on disk.
 
 Backs ``start_library_file_upload`` / ``append_upload_chunk`` /
-``finalize_library_file_upload`` (``core.writes``). Chunk bytes live only in
+``finalize_library_file_upload`` (``core.upload_writes``). Chunk bytes live only in
 ``projects/<key>/.ferumind/uploads/<upload_id>/chunks/`` — never in the DB or
 the operation log — so a large file in transit never bloats the operations
 table. The pending upload session's declared identity (filename, folder,

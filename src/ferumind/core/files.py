@@ -32,7 +32,7 @@ from ferumind.core.errors import ValidationError
 from ferumind.core.file_uri import build_file_uri, decode_relative_path, encode_relative_path
 from ferumind.core.paths import contained_path
 from ferumind.core.types import JsonObject, JsonValue, StrictModel
-from ferumind.core.writes import MAX_UPLOAD_METADATA_BYTES, upload_metadata_path
+from ferumind.core.write_limits import MAX_UPLOAD_METADATA_BYTES, upload_metadata_path
 
 #: How a file can reach model context through ``read_file``.
 #:
@@ -117,7 +117,7 @@ DEFAULT_MIME_TYPE: Final = "application/octet-stream"
 MARKDOWN_MIME_TYPE: Final = "text/markdown"
 
 #: Server-stamped keys every Ferumind upload sidecar carries
-#: (``writes._write_uploaded_file``). A ``.json`` file is treated as a
+#: (``upload_writes._write_uploaded_file``). A ``.json`` file is treated as a
 #: sidecar only when it carries all of them *and* a matching content file
 #: exists, so a user-authored ``.json`` is never hidden from discovery.
 UPLOAD_SIDECAR_STAMPED_KEYS: Final[frozenset[str]] = frozenset(
@@ -209,7 +209,7 @@ def is_markdown_path(path: str) -> bool:
 def _has_sidecar_content_file(project_root: Path, sidecar_rel: str) -> bool:
     """Return whether some content file on disk would produce *sidecar_rel*.
 
-    Inverts :func:`ferumind.core.writes.upload_metadata_path`. A
+    Inverts :func:`ferumind.core.write_limits.upload_metadata_path`. A
     ``.metadata.json`` name belongs to exactly one content path; the
     extension-replaced form (``photo.json``) belongs to any sibling sharing
     the stem, so the directory is consulted rather than guessed.

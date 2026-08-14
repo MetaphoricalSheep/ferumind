@@ -42,10 +42,11 @@ OP_STATES: Final[frozenset[str]] = frozenset(
 )
 
 #: Operation sources: agent-driven MCP calls, out-of-band disk edits noticed
-#: by reconcile-on-read, watcher detections, and CLI actions.
+#: by reconcile-on-read, and CLI actions. Historical rows may carry a
+#: ``watcher`` source from the removed liveness layer; the column is free text
+#: and those rows stay readable.
 SOURCE_AGENT: Final = "agent"
 SOURCE_OUT_OF_BAND: Final = "out-of-band"
-SOURCE_WATCHER: Final = "watcher"
 SOURCE_CLI: Final = "cli"
 
 #: Reserved operation-log scope for workspace-level mutations such as compacts.

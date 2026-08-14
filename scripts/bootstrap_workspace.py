@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Initialize a Ferumind v2 workspace.
+"""Initialize a Ferumind workspace.
 
 Creates the workspace skeleton per product/spec-mcp.md §2 and installs the
 contract content from product/contract/ (the source of record) into
@@ -9,6 +9,7 @@ Even with --force, workspace identity and the project registry are preserved.
 Usage:
     uv run python scripts/bootstrap_workspace.py
     uv run python scripts/bootstrap_workspace.py --workspace /custom/path
+    FERUMIND_WORKSPACE=/custom/path uv run python scripts/bootstrap_workspace.py
     uv run python scripts/bootstrap_workspace.py --force
 """
 
@@ -19,31 +20,26 @@ import sys
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ferumind.core.config import load_config
+from ferumind.core.contract_install import install_contract
 from ferumind.core.errors import FormatUnsupportedError
 from ferumind.core.file_io import atomic_write_text
-from ferumind.core.format import read_format
+from ferumind.core.format import SUPPORTED_FORMAT, read_format
 from ferumind.core.locks import acquire_workspace_lock
 from ferumind.core.paths import WorkspaceRoot, contained_path
 
-FORMAT_VERSION = 2
+#: A bootstrapped workspace is a current-format workspace, always. Deriving
+#: this from core rather than restating it means a format bump cannot leave
+#: bootstrap writing a marker the server no longer serves.
+FORMAT_VERSION = SUPPORTED_FORMAT
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 CONTRACT_DIR = REPO_ROOT / "product" / "contract"
 
-# product/contract source → workspace-relative destination
-CONTRACT_INSTALLS: dict[str, str] = {
-    "rules/00-contract.md": "system/rules/00-contract.md",
-    "rules/10-editing.md": "system/rules/10-editing.md",
-    "rules/20-memory.md": "system/rules/20-memory.md",
-    "rules/30-reminders.md": "system/rules/30-reminders.md",
-    "bootstrap.md": "system/prompts/bootstrap.md",
-    "templates/spine.md": "system/templates/spine.md",
-    "templates/project-rules.md": "system/templates/project-rules.md",
-}
-
 DIRECTORIES: list[str] = [
     "system",
     "system/rules",
+    "system/skills",
     "system/prompts",
     "system/templates",
     "system/schemas",
@@ -53,7 +49,7 @@ DIRECTORIES: list[str] = [
 AGENTS_POINTER = """\
 # Ferumind workspace
 
-This is a Ferumind v2 workspace. It is live user data, not source code.
+This is a Ferumind workspace. It is live user data, not source code.
 
 - The rules that govern how agents work here live in `system/rules/`
   (read them in lexical order; project rules in `projects/<key>/rules/`
@@ -146,17 +142,12 @@ def bootstrap(workspace: Path, force: bool) -> list[str]:
         _write(workspace_root, "system/projects.yml", "projects: {}\n", False, written)
         _write(workspace_root, "AGENTS.md", AGENTS_POINTER, False, written)
 
-        for src_rel, dest_rel in CONTRACT_INSTALLS.items():
-            source = CONTRACT_DIR / src_rel
-            if not source.is_file():
-                raise FileNotFoundError(f"Contract source missing: {source}")
-            _write(
-                workspace_root,
-                dest_rel,
-                source.read_text(encoding="utf-8"),
-                force,
-                written,
-            )
+        # Shared with the format migrators, so a migrated workspace and a
+        # freshly bootstrapped one converge on the same contract.
+        written.extend(
+            str(contained_path(workspace_root, rel))
+            for rel in install_contract(workspace_root, source=CONTRACT_DIR, force=force)
+        )
 
         return written
 
@@ -166,8 +157,11 @@ def main() -> int:
     parser.add_argument(
         "--workspace",
         type=Path,
-        default=REPO_ROOT / "workspace",
-        help="Workspace directory to initialize (default: <repo>/workspace)",
+        default=None,
+        help=(
+            "Workspace directory to initialize "
+            "(default: $FERUMIND_WORKSPACE, else <repo>/workspace)"
+        ),
     )
     parser.add_argument(
         "--force",
@@ -176,7 +170,19 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    workspace: Path = args.workspace.resolve()
+    # Same resolution order as the CLI and the MCP server: explicit flag, then
+    # FERUMIND_WORKSPACE, then the repo-local default. This script used to
+    # hardcode the repo default, so anyone who exported FERUMIND_WORKSPACE and
+    # ran bootstrap silently initialized the *repo's* workspace instead of
+    # their own.
+    #
+    # A relative value resolves against the repo root, not the caller's cwd —
+    # matching cli.main._workspace_root, so `bootstrap` and `ferumind info`
+    # never disagree about which workspace they mean.
+    configured = args.workspace or load_config().workspace_path
+    workspace: Path = (
+        configured.resolve() if configured.is_absolute() else (REPO_ROOT / configured).resolve()
+    )
     written = bootstrap(workspace, args.force)
     if written:
         print(f"Initialized {workspace}:")

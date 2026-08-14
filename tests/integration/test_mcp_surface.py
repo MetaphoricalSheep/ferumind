@@ -1,6 +1,6 @@
-"""Integration tests for the MCP surface v2 — spec-mcp §10 acceptance criteria.
+"""Integration tests for the MCP surface — spec-mcp §10 acceptance criteria.
 
-Every tool is called cold through its registered FastMCP function with a
+Every tool is called cold through its registered tool function with a
 fresh per-test workspace: no tool requires any prior call except
 ``apply_patch`` (which requires a ``propose_*``).
 """
@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import inspect
 import json
+import re
 import subprocess
 from collections.abc import Awaitable, Callable, Iterator
 from pathlib import Path
@@ -20,14 +21,13 @@ import pytest
 from mcp.types import CallToolResult
 
 from ferumind.core.edit_targets import ExactEdit, InsertAnchor
-from ferumind.core.format import write_format_marker
+from ferumind.core.format import SUPPORTED_FORMAT, write_format_marker
 from ferumind.core.observations import list_observations
 from ferumind.core.paths import WorkspaceRoot
-from ferumind.core.writes import ChatGPTFileInput
+from ferumind.core.upload_writes import ChatGPTFileInput
+from ferumind.mcp.sdk_internals import registered_tools
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-
-_observed = False
 
 type ToolMap = dict[str, Callable[..., CallToolResult]]
 
@@ -39,7 +39,7 @@ async def _await_tool_result(awaitable: Awaitable[CallToolResult]) -> CallToolRe
 @pytest.fixture
 def run_test_remote_uploads_inline(monkeypatch: pytest.MonkeyPatch) -> None:
     """Keep surface tests focused on results; offload behavior has a dedicated test."""
-    from ferumind.mcp import write_tools
+    from ferumind.mcp import upload_tools
 
     async def run_inline[T](
         func: Callable[..., T],
@@ -48,7 +48,7 @@ def run_test_remote_uploads_inline(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> T:
         return func(*args)
 
-    monkeypatch.setattr(write_tools, "run_sync", run_inline)
+    monkeypatch.setattr(upload_tools, "run_sync", run_inline)
 
 
 def _fake_fetch(content: bytes) -> Callable[..., bytes]:
@@ -69,47 +69,66 @@ def _fake_fetch_echoing_url() -> Callable[..., bytes]:
     return fetch
 
 
-def _ensure_observed() -> None:
-    """Apply the observation wrapper exactly once per test session."""
-    global _observed
-    if _observed:
-        return
-    from ferumind.mcp.observation import apply_observation_to_all_tools
-    from ferumind.mcp.server import mcp
-
-    apply_observation_to_all_tools(mcp)
-    _observed = True
-
-
 @pytest.fixture
 def tools(
     workspace: WorkspaceRoot,
     run_test_remote_uploads_inline: None,
 ) -> Iterator[ToolMap]:
-    """The full registered tool surface bound to a fresh workspace."""
+    """The full registered tool surface bound to a fresh workspace.
+
+    These tests call tool *bodies* directly. That deliberately bypasses the
+    protocol layer, so it exercises neither argument validation nor call
+    observation — both of those are boundary behaviour with their own suites
+    (``test_mcp_hardening.py``, ``test_call_observation_middleware.py``), and
+    anything that asserts on them must go through a real client instead.
+    """
     from ferumind.mcp import server, tool_context
 
     tool_context.reset_tool_context()
     tool_context.init_tool_context(Path(workspace))
     server.register_all_tools()
-    _ensure_observed()
-    tool_manager = server.mcp._tool_manager  # pyright: ignore[reportPrivateUsage]
-    registered = cast("dict[str, Any]", tool_manager._tools)  # pyright: ignore[reportPrivateUsage]
-    yield {name: tool.fn for name, tool in registered.items()}
+    yield {tool.name: tool.fn for tool in registered_tools(server.mcp)}
     tool_context.reset_tool_context()
 
 
-def call(tools: ToolMap, name: str, **kwargs: object) -> dict[str, Any]:
+def _assert_matches_output_schema(name: str, structured: dict[str, Any]) -> None:
+    """Validate a result the way the SDK does on a real client call.
+
+    These tests call tool *bodies*, which skips ``FuncMetadata.convert_result``
+    — the step that validates ``structured_content`` against the declared
+    ``outputSchema``. Without this, a payload model that disagrees with what
+    the tool actually returns stays green here and raises ``ToolError`` for
+    every real caller. Doing it inside ``call`` means every assertion in this
+    file checks the contract, not just the tests written for it.
+    """
+    from ferumind.mcp.server import mcp
+
+    tool = next(t for t in registered_tools(mcp) if t.name == name)
+    model = tool.fn_metadata.output_model
+    assert model is not None, f"{name} advertises no output model"
+    try:
+        model.model_validate(structured)
+    except Exception as exc:
+        raise AssertionError(
+            f"{name} returned a payload its own outputSchema rejects: {exc}\n"
+            "The declared model in mcp/result_models.py disagrees with what the tool "
+            "builds. A real client call would fail with ToolError."
+        ) from exc
+
+
+def call(tools: ToolMap, name: str, /, **kwargs: object) -> dict[str, Any]:
+    """Positional-only so a tool may take its own ``tools``/``name`` argument."""
     result = tools[name](**kwargs)
     if inspect.isawaitable(result):
         result = anyio.run(_await_tool_result, cast("Awaitable[CallToolResult]", result))
     assert isinstance(result, CallToolResult)
-    structured = result.structuredContent
+    structured = result.structured_content
     assert isinstance(structured, dict)
-    return structured
+    _assert_matches_output_schema(name, cast("dict[str, Any]", structured))
+    return cast("dict[str, Any]", structured)
 
 
-def ok(tools: ToolMap, name: str, **kwargs: object) -> dict[str, Any]:
+def ok(tools: ToolMap, name: str, /, **kwargs: object) -> dict[str, Any]:
     envelope = call(tools, name, **kwargs)
     assert envelope["ok"] is True, f"{name} failed: {envelope}"
     return cast("dict[str, Any]", envelope["data"])
@@ -124,6 +143,7 @@ def demo(tools: ToolMap) -> str:
         project="demo",
         folder_path="canvases",
         title="Plan",
+        description="Fixture canvas used by the MCP surface tests.",
         content="# Plan\n\nalpha beta gamma\n",
     )
     return "demo"
@@ -132,7 +152,7 @@ def demo(tools: ToolMap) -> str:
 class TestSurfaceShape:
     def test_tool_inventory_includes_workspace_compacts(self, tools: ToolMap) -> None:
         expected = {
-            # 17 read
+            # 18 read
             "get_context",
             "read_document",
             "read_document_range",
@@ -147,6 +167,7 @@ class TestSurfaceShape:
             "list_snapshots",
             "read_snapshot",
             "list_projects",
+            "read_skill",
             "get_compact_instructions",
             "read_compact",
             "list_compacts",
@@ -163,7 +184,7 @@ class TestSurfaceShape:
             "start_library_file_upload",
             "append_upload_chunk",
             "discard_upload",
-            # 17 mutate
+            # 18 mutate
             "apply_patch",
             "create_document",
             "upload_library_file",
@@ -171,6 +192,7 @@ class TestSurfaceShape:
             "upload_library_files_from_chatgpt",
             "upload_library_file_from_chatgpt",
             "capture_note",
+            "record_episode",
             "archive_document",
             "unarchive_document",
             "restore_snapshot",
@@ -183,16 +205,14 @@ class TestSurfaceShape:
             "archive_compact",
         }
         assert set(tools) == expected
-        assert len(tools) == 46
+        assert len(tools) == 48
+        assert "read_document_outline" not in tools
 
     @pytest.mark.usefixtures("tools")
     def test_annotation_taxonomy(self) -> None:
         from ferumind.mcp.server import mcp
 
-        registered = cast(
-            "dict[str, Any]",
-            mcp._tool_manager._tools,  # pyright: ignore[reportPrivateUsage]
-        )
+        registered = {tool.name: tool for tool in registered_tools(mcp)}
         read_only = {
             "get_context",
             "read_document",
@@ -208,6 +228,7 @@ class TestSurfaceShape:
             "list_snapshots",
             "read_snapshot",
             "list_projects",
+            "read_skill",
             "get_compact_instructions",
             "read_compact",
             "list_compacts",
@@ -232,16 +253,61 @@ class TestSurfaceShape:
         }
         for name, tool in registered.items():
             annotations = tool.annotations
-            assert bool(annotations.openWorldHint) is (name in remote_download), name
+            assert annotations is not None, f"{name} registered without annotations"
+            assert bool(annotations.open_world_hint) is (name in remote_download), name
             if name in read_only:
-                assert annotations.readOnlyHint, name
-                assert annotations.idempotentHint, name
+                assert annotations.read_only_hint, name
+                assert annotations.idempotent_hint, name
             elif name in proposal:
-                assert annotations.readOnlyHint, name
-                assert not annotations.idempotentHint, name
+                assert annotations.read_only_hint, name
+                assert not annotations.idempotent_hint, name
             else:
-                assert not annotations.readOnlyHint, name
-                assert not annotations.idempotentHint, name
+                assert not annotations.read_only_hint, name
+                assert not annotations.idempotent_hint, name
+
+
+class TestSkills:
+    """Index-plus-on-demand delivery, exercised through the tool surface."""
+
+    def test_a_fresh_agent_reaches_a_skill_body_in_two_calls(
+        self,
+        tools: ToolMap,
+        demo: str,
+    ) -> None:
+        """get_context advertises the trigger; read_skill fetches the body."""
+        context = ok(tools, "get_context", project=demo)
+
+        index = cast("list[dict[str, Any]]", context["skills"])
+        assert index, "get_context advertises the installed skills"
+        entry = index[0]
+        assert entry["description"].startswith("Use ")
+        assert "content_markdown" not in entry
+
+        skill = ok(tools, "read_skill", name=entry["name"])
+
+        assert skill["name"] == entry["name"]
+        assert skill["path"] == entry["path"]
+        assert len(skill["content_markdown"]) > len(entry["description"])
+
+    def test_skill_bodies_never_ride_in_get_context(self, tools: ToolMap, demo: str) -> None:
+        context = ok(tools, "get_context", project=demo)
+        body = ok(tools, "read_skill", name="distilling-durable-knowledge")["content_markdown"]
+
+        marker = "## Step 3 — Merge before proliferating"
+        assert marker in body
+        assert marker not in json.dumps(context)
+
+    def test_read_skill_takes_no_project_and_refuses_a_traversal(self, tools: ToolMap) -> None:
+        envelope = call(tools, "read_skill", name="../rules/00-contract")
+
+        assert envelope["ok"] is False
+        assert envelope["error_code"] == "VALIDATION_ERROR"
+
+    def test_unknown_skill_returns_a_machine_readable_code(self, tools: ToolMap) -> None:
+        envelope = call(tools, "read_skill", name="no-such-skill")
+
+        assert envelope["ok"] is False
+        assert envelope["error_code"] == "SKILL_NOT_FOUND"
 
 
 class TestCompactTools:
@@ -345,12 +411,9 @@ class TestCompactTools:
     def test_no_tool_takes_a_session_parameter(self) -> None:
         from ferumind.mcp.server import mcp
 
-        registered = cast(
-            "dict[str, Any]",
-            mcp._tool_manager._tools,  # pyright: ignore[reportPrivateUsage]
-        )
+        registered = {tool.name: tool for tool in registered_tools(mcp)}
         for name, tool in registered.items():
-            schema = cast("dict[str, Any]", tool.parameters)
+            schema = tool.parameters
             properties = cast("dict[str, Any]", schema.get("properties", {}))
             assert not any("session" in key for key in properties), name
 
@@ -371,9 +434,11 @@ class TestColdCallability:
     def test_every_tool_cold(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from ferumind.core import writes
+        from ferumind.core import upload_writes
 
-        monkeypatch.setattr(writes, "fetch_remote_file", _fake_fetch(b"cold call chatgpt bytes"))
+        monkeypatch.setattr(
+            upload_writes, "fetch_remote_file", _fake_fetch(b"cold call chatgpt bytes")
+        )
 
         doc = "canvases/plan.md"
         document_sha = ok(tools, "read_document", project=demo, path=doc)["document_sha256"]
@@ -400,6 +465,11 @@ class TestColdCallability:
             "list_snapshots": {"project": demo},
             "list_projects": {},
             "capture_note": {"project": demo, "text": "note"},
+            "record_episode": {
+                "project": demo,
+                "title": "Cold call",
+                "summary": "Recorded by the cold-call sweep.",
+            },
             "upload_library_file": {
                 "project": demo,
                 "filename": "cold-call.pdf",
@@ -633,6 +703,87 @@ class TestProjectScoping:
         assert envelope["error_code"] == "PATCH_PROJECT_MISMATCH"
 
 
+class TestDocumentMapAgreement:
+    """RET-04: map sections and indexed sections agree at the MCP tool boundary."""
+
+    def test_map_sections_agree_with_section_index(self, tools: ToolMap, demo: str) -> None:
+        from ferumind.mcp.tool_context import require_database
+
+        created = ok(
+            tools,
+            "create_document",
+            project=demo,
+            folder_path="canvases",
+            title="Mapped",
+            description="Fixture canvas used by the MCP surface tests.",
+            content=("# Root\n\nintro\n\n## Child One\n\none body\n\n## Child Two\n\ntwo body\n"),
+        )
+        doc = created["path"]
+        ok(tools, "rebuild_index", project=demo)
+        doc_map = ok(tools, "get_document_map", project=demo, path=doc)
+        sections = doc_map["sections"]
+        assert len(sections) >= 3
+
+        db = require_database()
+        conn = db.get_connection()
+        try:
+            rows = list(
+                conn.execute(
+                    """SELECT section_id, start_line, end_line, content_sha256, size_bytes
+                       FROM section_index
+                       WHERE project_key = ? AND path = ?
+                       ORDER BY CAST(start_line AS INTEGER), section_id""",
+                    (demo, doc),
+                ).fetchall()
+            )
+        finally:
+            conn.close()
+
+        assert len(rows) == len(sections)
+        for row, section in zip(rows, sections, strict=True):
+            assert row["section_id"] == section["section_id"]
+            assert int(row["start_line"]) == section["start_line"]
+            assert int(row["end_line"]) == section["end_line"]
+            assert row["content_sha256"] == section["content_sha256"]
+            assert int(row["size_bytes"]) == section["size_bytes"]
+
+    def test_hash_guarded_section_patch_round_trip(self, tools: ToolMap, demo: str) -> None:
+        created = ok(
+            tools,
+            "create_document",
+            project=demo,
+            folder_path="canvases",
+            title="Section Patch",
+            description="Fixture canvas used by the MCP surface tests.",
+            content="# Alpha\n\nalpha body\n\n## Beta\n\nbeta body\n",
+        )
+        doc = created["path"]
+        doc_map = ok(tools, "get_document_map", project=demo, path=doc)
+        beta = next(s for s in doc_map["sections"] if s.get("heading_text") == "Beta")
+        assert "size_bytes" in beta
+        assert beta["size_bytes"] > 0
+
+        proposal = ok(
+            tools,
+            "propose_section_patch",
+            project=demo,
+            path=doc,
+            section_id=beta["section_id"],
+            expected_document_sha256=doc_map["document_sha256"],
+            expected_section_sha256=beta["content_sha256"],
+            new_content="## Beta\n\npatched beta\n",
+        )
+        assert proposal["document_mutated"] is False
+        assert proposal["requires_apply"] is True
+
+        applied = ok(tools, "apply_patch", project=demo, operation_id=proposal["operation_id"])
+        assert applied["document_mutated"] is True
+        after = ok(tools, "read_document", project=demo, path=doc)
+        assert "patched beta" in after["content"]
+        assert "alpha body" in after["content"]
+        assert after["document_sha256"] == applied["document_sha256"]
+
+
 class TestOutOfBand:
     """§10.3: apply after an out-of-band edit returns PATCH_CONFLICT, never clobbers."""
 
@@ -658,6 +809,42 @@ class TestOutOfBand:
         assert target.read_text(encoding="utf-8") == hand_edited
         oplog = ok(tools, "operation_log", project=demo, path=doc)["operations"]
         assert any(op["source"] == "out-of-band" for op in oplog)
+
+    def test_section_patch_conflicts_after_out_of_band_edit(
+        self, tools: ToolMap, demo: str, workspace: WorkspaceRoot
+    ) -> None:
+        """RET-04: map→propose_section_patch→apply still fails closed on OOB edits."""
+        created = ok(
+            tools,
+            "create_document",
+            project=demo,
+            folder_path="canvases",
+            title="Section OOB",
+            description="Fixture canvas used by the MCP surface tests.",
+            content=("# Alpha\n\nalpha body\n\n## Beta\n\nbeta body\n\n## Gamma\n\ngamma body\n"),
+        )
+        doc = created["path"]
+        doc_map = ok(tools, "get_document_map", project=demo, path=doc)
+        beta = next(s for s in doc_map["sections"] if s.get("heading_text") == "Beta")
+        proposal = ok(
+            tools,
+            "propose_section_patch",
+            project=demo,
+            path=doc,
+            section_id=beta["section_id"],
+            expected_document_sha256=doc_map["document_sha256"],
+            expected_section_sha256=beta["content_sha256"],
+            new_content="## Beta\n\nrewritten beta\n",
+        )
+        target = Path(workspace) / "projects" / demo / doc
+        before = target.read_text(encoding="utf-8")
+        hand_edited = before + "\nhand edit between map and apply\n"
+        target.write_text(hand_edited, encoding="utf-8")
+
+        envelope = call(tools, "apply_patch", project=demo, operation_id=proposal["operation_id"])
+        assert envelope["ok"] is False
+        assert envelope["error_code"] == "PATCH_CONFLICT"
+        assert target.read_text(encoding="utf-8") == hand_edited
 
 
 class TestArchiveRoundTrip:
@@ -729,9 +916,9 @@ class TestUploadLibraryFile:
         # Exercise the boundary against a small patched cap rather than
         # allocating/base64-encoding a real MAX_CHUNK_BYTES-sized payload
         # (upload_library_file shares the single-call cap with one chunk).
-        from ferumind.core import writes
+        from ferumind.core import upload_writes
 
-        monkeypatch.setattr(writes, "MAX_CHUNK_BYTES", 16)
+        monkeypatch.setattr(upload_writes, "MAX_CHUNK_BYTES", 16)
         too_big = call(
             tools,
             "upload_library_file",
@@ -820,10 +1007,7 @@ class TestChatGPTFileUpload:
     def test_tool_descriptor_matches_chatgpt_file_schema_exactly(self) -> None:
         from ferumind.mcp.server import mcp
 
-        registered = cast(
-            "dict[str, Any]",
-            mcp._tool_manager._tools,  # pyright: ignore[reportPrivateUsage]
-        )
+        registered = {tool.name: tool for tool in registered_tools(mcp)}
         tool = registered["upload_library_files_from_chatgpt"]
 
         assert tool.meta == {"openai/fileParams": ["files"]}
@@ -866,9 +1050,11 @@ class TestChatGPTFileUpload:
     def test_downloads_and_stores_via_normal_ingestion_pipeline(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from ferumind.core import writes
+        from ferumind.core import upload_writes
 
-        monkeypatch.setattr(writes, "fetch_remote_file", _fake_fetch(b"downloaded chatgpt bytes"))
+        monkeypatch.setattr(
+            upload_writes, "fetch_remote_file", _fake_fetch(b"downloaded chatgpt bytes")
+        )
         result = ok(
             tools,
             "upload_library_files_from_chatgpt",
@@ -897,9 +1083,9 @@ class TestChatGPTFileUpload:
     def test_multiple_files_in_one_call(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from ferumind.core import writes
+        from ferumind.core import upload_writes
 
-        monkeypatch.setattr(writes, "fetch_remote_file", _fake_fetch_echoing_url())
+        monkeypatch.setattr(upload_writes, "fetch_remote_file", _fake_fetch_echoing_url())
         result = ok(
             tools,
             "upload_library_files_from_chatgpt",
@@ -919,15 +1105,18 @@ class TestChatGPTFileUpload:
     def test_partial_batch_failure_is_explicit(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from ferumind.core import writes
+        from ferumind.core import upload_writes
         from ferumind.core.errors import DownloadFailedError
 
+        calls: list[str] = []
+
         def fake_fetch(url: str, **kwargs: object) -> bytes:
+            calls.append(url)
             if "bad" in url:
                 raise DownloadFailedError("simulated failure")
             return b"ok bytes"
 
-        monkeypatch.setattr(writes, "fetch_remote_file", fake_fetch)
+        monkeypatch.setattr(upload_writes, "fetch_remote_file", fake_fetch)
         result = ok(
             tools,
             "upload_library_files_from_chatgpt",
@@ -941,6 +1130,9 @@ class TestChatGPTFileUpload:
                 ),
             ],
         )
+        # A disarmed patch would send this test at the real network instead of
+        # the stub, so pin that the stub is what answered.
+        assert calls == ["https://chatgpt.example/good", "https://chatgpt.example/bad"]
         assert result["succeeded"] == 1
         assert result["failed"] == 1
         assert len(result["results"]) == 2
@@ -979,10 +1171,7 @@ class TestChatGPTFileUpload:
         """
         from ferumind.mcp.server import mcp
 
-        registered = cast(
-            "dict[str, Any]",
-            mcp._tool_manager._tools,  # pyright: ignore[reportPrivateUsage]
-        )
+        registered = {tool.name: tool for tool in registered_tools(mcp)}
         properties = registered["upload_library_files_from_chatgpt"].parameters["properties"]
         assert set(properties) == {"project", "files", "folder_path"}
 
@@ -993,10 +1182,7 @@ class TestChatGPTSingleFileUpload:
     def test_tool_descriptor_declares_a_single_top_level_file_param(self) -> None:
         from ferumind.mcp.server import mcp
 
-        registered = cast(
-            "dict[str, Any]",
-            mcp._tool_manager._tools,  # pyright: ignore[reportPrivateUsage]
-        )
+        registered = {tool.name: tool for tool in registered_tools(mcp)}
         tool = registered["upload_library_file_from_chatgpt"]
 
         assert tool.meta == {"openai/fileParams": ["file"]}
@@ -1034,9 +1220,9 @@ class TestChatGPTSingleFileUpload:
     def test_stores_under_the_requested_filename(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from ferumind.core import writes
+        from ferumind.core import upload_writes
 
-        monkeypatch.setattr(writes, "fetch_remote_file", _fake_fetch(b"single file bytes"))
+        monkeypatch.setattr(upload_writes, "fetch_remote_file", _fake_fetch(b"single file bytes"))
         result = ok(
             tools,
             "upload_library_file_from_chatgpt",
@@ -1059,13 +1245,16 @@ class TestChatGPTSingleFileUpload:
     def test_download_failure_is_a_tool_error_not_a_partial_result(
         self, tools: ToolMap, demo: str, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        from ferumind.core import writes
+        from ferumind.core import upload_writes
         from ferumind.core.errors import DownloadFailedError
 
+        calls: list[str] = []
+
         def fake_fetch(url: str, **kwargs: object) -> bytes:
+            calls.append(url)
             raise DownloadFailedError("simulated failure")
 
-        monkeypatch.setattr(writes, "fetch_remote_file", fake_fetch)
+        monkeypatch.setattr(upload_writes, "fetch_remote_file", fake_fetch)
         result = call(
             tools,
             "upload_library_file_from_chatgpt",
@@ -1073,6 +1262,9 @@ class TestChatGPTSingleFileUpload:
             file=ChatGPTFileInput(download_url="https://chatgpt.example/x", file_id="f1"),
             filename="nope.bin",
         )
+        # A real fetch would also fail here, and for the wrong reason. Pin that
+        # the stub is what refused, not the network.
+        assert calls == ["https://chatgpt.example/x"], "the injected download failure never fired"
         assert result["error_code"] == "DOWNLOAD_FAILED"
 
     def test_unsafe_url_rejected_end_to_end(self, tools: ToolMap, demo: str) -> None:
@@ -1093,19 +1285,37 @@ class TestGetContextContract:
     def test_payload_telemetry_and_format_echo(self, tools: ToolMap, demo: str) -> None:
         data = ok(tools, "get_context", project=demo)
         payload = data["payload"]
-        assert payload["format"] == 2
+        assert payload["format"] == SUPPORTED_FORMAT
         assert payload["rules_bytes"] > 0
         assert payload["spine_bytes"] > 0
         assert payload["documents_count"] == len(data["documents"])
+        # Format 3 put a per-document cost in the contract call; the cap
+        # decision spec-mcp §4 parks on telemetry needs it broken out.
+        assert payload["descriptions_bytes"] > 0
+        assert all(entry["description"] for entry in data["documents"])
+        assert all(entry["size_bytes"] > 0 for entry in data["documents"])
         assert data["project"] == {"key": "demo", "title": "Demo", "status": "active"}
         assert data["rules"]["sources"][0] == "system/rules/00-contract.md"
         assert data["spine"]["path"] == "spine.md"
 
-    def test_observation_rows_carry_payload_metrics(self, tools: ToolMap, demo: str) -> None:
-        """§10.6: get_context observations carry the three payload metrics."""
+    @pytest.mark.usefixtures("tools")
+    def test_observation_rows_carry_payload_metrics(self, demo: str) -> None:
+        """§10.6: get_context observations carry every payload metric.
+
+        Driven through a real client, not the tool body: observation is server
+        middleware, so it only runs on the protocol path.
+        """
+        from mcp.client.client import Client
+
+        from ferumind.mcp.server import mcp
         from ferumind.mcp.tool_context import require_database
 
-        ok(tools, "get_context", project=demo)
+        async def body() -> None:
+            async with Client(mcp) as session:
+                await session.call_tool("get_context", {"project": demo})
+
+        anyio.run(body)
+
         conn = require_database().get_connection()
         try:
             rows = list_observations(conn, tool_name="get_context", limit=1)
@@ -1116,8 +1326,46 @@ class TestGetContextContract:
         assert record.result_bytes is not None
         assert record.result_bytes > 0
         assert record.duration_ms is not None
+        assert record.client_name, "client identity should reach the observation log"
+        assert record.protocol_version
         metrics = json.loads(record.context_metrics_json)
-        assert set(metrics) == {"rules_bytes", "spine_bytes", "documents_count"}
+        assert set(metrics) == {
+            "rules_bytes",
+            "spine_bytes",
+            "documents_count",
+            "skills_bytes",
+            "descriptions_bytes",
+        }
+
+
+class TestDescriptionContract:
+    def test_real_dispatch_rejects_create_document_without_description(
+        self,
+        demo: str,
+        workspace: WorkspaceRoot,
+    ) -> None:
+        """The required MCP argument is enforced before the tool body writes."""
+        from ferumind.mcp.server import mcp
+
+        async def scenario() -> CallToolResult:
+            result = await mcp.call_tool(
+                "create_document",
+                {
+                    "project": demo,
+                    "folder_path": "canvases",
+                    "title": "Missing Description",
+                    "content": "# Missing Description\n",
+                },
+            )
+            assert isinstance(result, CallToolResult)
+            return result
+
+        result = anyio.run(scenario)
+        assert result.is_error is True
+        structured = cast("dict[str, Any]", result.structured_content)
+        assert structured["ok"] is False
+        assert structured["error_code"] == "VALIDATION_ERROR"
+        assert not (workspace / "projects/demo/canvases/missing-description.md").exists()
 
 
 class TestPathSafety:
@@ -1170,13 +1418,82 @@ class TestPathSafety:
         assert envelope["error_code"] == "WORKSPACE_MISMATCH"
 
 
+class TestRecordEpisodeTool:
+    def test_one_call_records_an_episode_and_saves_it(self, tools: ToolMap, demo: str) -> None:
+        data = ok(
+            tools,
+            "record_episode",
+            project=demo,
+            title="Upper-arm pain after bench",
+            summary="Pain followed the session; the next one was dropped.",
+        )
+
+        assert data["document_mutated"] is True
+        assert data["month_file_created"] is True
+        assert data["path"].startswith("memory/episodes/")
+        assert data["folder"] == "memory"
+        assert data["episode_id"].startswith("ep_")
+        assert data["snapshot_id"]
+
+    def test_a_second_call_appends_into_the_same_month(self, tools: ToolMap, demo: str) -> None:
+        first = ok(tools, "record_episode", project=demo, title="First", summary="One.")
+        second = ok(
+            tools,
+            "record_episode",
+            project=demo,
+            title="Second",
+            summary="Two.",
+            related_episode_id=first["episode_id"],
+        )
+
+        assert second["month_file_created"] is False
+        assert second["path"] == first["path"]
+        assert second["episode_id"] != first["episode_id"]
+
+        document = ok(tools, "read_document", project=demo, path=first["path"])
+        assert first["episode_id"] in document["content"]
+        assert second["episode_id"] in document["content"]
+        assert document["edit_policy"] == "append"
+
+    def test_the_project_argument_is_an_assertion_not_an_override(
+        self, tools: ToolMap, demo: str
+    ) -> None:
+        unknown = call(tools, "record_episode", project="no-such-project", title="t", summary="s")
+        assert unknown["error_code"] == "PROJECT_NOT_FOUND"
+
+        blank = call(tools, "record_episode", project="", title="t", summary="s")
+        assert blank["error_code"] in {"PROJECT_REQUIRED", "PROJECT_NOT_FOUND"}
+        assert demo  # the real project is untouched by either refusal
+
+    def test_a_related_path_cannot_escape_the_project(self, tools: ToolMap, demo: str) -> None:
+        envelope = call(
+            tools,
+            "record_episode",
+            project=demo,
+            title="Escape attempt",
+            summary="Tries to name a file outside the project.",
+            related_paths=["../../../etc/passwd"],
+        )
+        assert envelope["ok"] is False
+        assert envelope["error_code"] in {"WORKSPACE_MISMATCH", "VALIDATION_ERROR"}
+
+    def test_the_write_is_refused_on_a_mismatched_workspace_format(
+        self, tools: ToolMap, demo: str, workspace: WorkspaceRoot
+    ) -> None:
+        write_format_marker(workspace, 1)
+        envelope = call(tools, "record_episode", project=demo, title="t", summary="s")
+        assert envelope["error_code"] == "FORMAT_UNSUPPORTED"
+        assert not (Path(workspace) / "projects" / demo / "memory" / "episodes").exists()
+
+
 class TestFormatGate:
     def test_old_format_reads_ok_writes_refused(
         self, tools: ToolMap, demo: str, workspace: WorkspaceRoot
     ) -> None:
-        write_format_marker(workspace, 1)
+        write_format_marker(workspace, SUPPORTED_FORMAT - 1)
         read = call(tools, "get_context", project=demo)
         assert read["ok"] is True
+        assert read["data"]["payload"]["format"] == SUPPORTED_FORMAT - 1
         write = call(
             tools,
             "propose_exact_replace_patch",
@@ -1194,28 +1511,221 @@ class TestFormatGate:
     def test_newer_format_refuses_everything(
         self, tools: ToolMap, demo: str, workspace: WorkspaceRoot
     ) -> None:
-        write_format_marker(workspace, 3)
+        write_format_marker(workspace, SUPPORTED_FORMAT + 1)
         read = call(tools, "get_context", project=demo)
         assert read["error_code"] == "FORMAT_UNSUPPORTED"
 
 
 class TestWireLevelConversion:
-    """Calls routed through FastMCP's result-conversion layer, not tool.fn.
+    """Calls routed through the SDK's result-conversion layer, not tool.fn.
 
-    Regression guard: the ``-> CallToolResult`` return annotations once made
-    FastMCP generate a bogus outputSchema and its convert_result step raised
-    on every real client call, while direct ``tool.fn`` tests stayed green.
-    Tools register with ``structured_output=False`` so the envelope passes
-    through the SDK verbatim.
+    This is the only place the output-schema contract is visible. A direct
+    ``tool.fn`` call never touches ``FuncMetadata.convert_result``, which is
+    what derives the schema and validates ``structured_content`` against it —
+    so every assertion here is invisible to the rest of the suite.
+
+    These tests exist because a docstring once asserted SDK behaviour that had
+    silently stopped being true (see ``make_result`` in ``mcp/models.py``).
+    They pin the behaviour instead of describing it.
     """
 
     @pytest.mark.usefixtures("tools")
-    def test_no_tool_advertises_an_output_schema(self) -> None:
+    def test_every_tool_advertises_a_client_usable_output_schema(self) -> None:
+        """Schema present, and shaped so real clients accept it.
+
+        Root must be ``type: object`` with no root ``$ref``: several clients
+        reject anything else outright. No ``JsonValue`` anywhere, because
+        ``core.types.JsonValue`` is recursive and cannot be resolved by a
+        client that flattens ``$ref``.
+        """
         from ferumind.mcp.server import mcp
 
         listed = anyio.run(mcp.list_tools)
-        assert len(listed) == 46
-        assert all(tool.outputSchema is None for tool in listed)
+        assert len(listed) == 48
+        problems: list[str] = []
+        for tool in listed:
+            schema = tool.output_schema
+            if schema is None:
+                problems.append(f"{tool.name}: no outputSchema")
+                continue
+            if schema.get("type") != "object":
+                problems.append(f"{tool.name}: root type is {schema.get('type')!r}, not 'object'")
+            if "$ref" in schema:
+                problems.append(f"{tool.name}: root is a $ref")
+            if "JsonValue" in json.dumps(schema):
+                problems.append(f"{tool.name}: reaches the recursive JsonValue alias")
+        assert not problems, (
+            "Output schemas are not client-usable:\n  "
+            + "\n  ".join(problems)
+            + "\nDeclare the tool as -> Annotated[CallToolResult, FerumindResult[Payload]] "
+            "and keep the payload model free of core.types.JsonObject/JsonValue. "
+            "See the mcp-tool-contracts skill."
+        )
+
+    @pytest.mark.usefixtures("tools")
+    def test_get_context_schema_declares_exact_document_and_payload_fields(self) -> None:
+        from ferumind.mcp.server import mcp
+
+        schema = next(
+            tool.output_schema for tool in anyio.run(mcp.list_tools) if tool.name == "get_context"
+        )
+        assert schema is not None
+        definitions = cast("dict[str, Any]", schema["$defs"])
+        document = cast("dict[str, Any]", definitions["ContextDocument"])
+        document_properties = cast("dict[str, Any]", document["properties"])
+        document_fields = {
+            "path",
+            "title",
+            "description",
+            "folder",
+            "status",
+            "edit_policy",
+            "updated",
+            "size_bytes",
+        }
+        assert set(document_properties) == document_fields
+        assert set(cast("list[str]", document["required"])) == document_fields
+        assert document_properties["description"] == {"type": "string"}
+        assert document_properties["size_bytes"] == {"type": "integer"}
+        assert document["additionalProperties"] is False
+
+        payload = cast("dict[str, Any]", definitions["ContextPayload"])
+        payload_properties = cast("dict[str, Any]", payload["properties"])
+        payload_fields = {
+            "format",
+            "rules_bytes",
+            "spine_bytes",
+            "documents_count",
+            "skills_bytes",
+            "descriptions_bytes",
+        }
+        assert set(payload_properties) == payload_fields
+        assert set(cast("list[str]", payload["required"])) == payload_fields
+        format_types = {
+            entry["type"]
+            for entry in cast("list[dict[str, str]]", payload_properties["format"]["anyOf"])
+        }
+        assert format_types == {"integer", "null"}
+        assert payload_properties["descriptions_bytes"] == {"type": "integer"}
+        assert payload["additionalProperties"] is False
+
+    @pytest.mark.usefixtures("tools")
+    def test_no_tool_passes_structured_output_false(self) -> None:
+        """``structured_output=False`` short-circuits schema derivation.
+
+        It is inert on mcp 2.x for a bare ``-> CallToolResult``, which is why
+        it survived unnoticed — but it is *not* inert now: it returns before
+        the ``Annotated`` metadata is read and would strip the schema from
+        every tool it is passed to.
+        """
+        sources = (REPO_ROOT / "src" / "ferumind" / "mcp").glob("*.py")
+        # Prose may discuss it — models.py records why it was removed. Only an
+        # actual keyword argument does damage.
+        offenders = sorted(
+            path.name
+            for path in sources
+            if re.search(r"structured_output\s*=", path.read_text()) and path.name != "protocols.py"
+        )
+        assert not offenders, (
+            f"{offenders} pass structured_output to a tool. It returns before the "
+            "Annotated return metadata is read, so it silently strips that tool's "
+            "outputSchema. Only the ToolRegistrar protocol may name it, to declare "
+            "it optional."
+        )
+
+    @pytest.mark.usefixtures("tools")
+    def test_declared_and_constructed_envelopes_cannot_drift(self) -> None:
+        """``FerumindResult`` describes what ``FerumindToolEnvelope`` builds."""
+        from ferumind.mcp.models import FerumindResult, FerumindToolEnvelope
+
+        declared = set(FerumindResult.model_fields)
+        constructed = set(FerumindToolEnvelope.model_fields)
+        assert declared == constructed, (
+            f"Envelope drift: declared-only={declared - constructed}, "
+            f"constructed-only={constructed - declared}. Every field a tool can emit "
+            "must be in the advertised schema or the SDK rejects the result."
+        )
+
+    @pytest.mark.usefixtures("tools")
+    def test_tool_definitions_stay_inside_their_context_budget(self) -> None:
+        """``tools/list`` is context every caller pays for on every session.
+
+        The ceiling is deliberately close to the current size. Crossing it
+        should be a decision, not an accident — if a change needs the room,
+        raise it here in the same commit and say why.
+        """
+        from ferumind.mcp.server import mcp
+
+        listed = anyio.run(mcp.list_tools)
+        payload = [tool.model_dump(by_alias=True, exclude_none=True) for tool in listed]
+        measured = len(json.dumps(payload))
+        budget = 150_000
+        assert measured <= budget, (
+            f"tools/list is {measured:,} bytes, over the {budget:,} byte budget. "
+            "Trim payload models or descriptions rather than raising this silently."
+        )
+
+    @pytest.mark.usefixtures("tools")
+    def test_descriptions_do_not_restate_the_schema(self) -> None:
+        """Shape lives in the schema; the description says when and why.
+
+        Duplication is how the two drift. Before output schemas existed the
+        descriptions were the only contract, and fifteen of them had gone
+        stale — ``list_projects`` advertised a ``path`` field it never
+        returned, ``rebuild_index`` named two fields that do not exist.
+        """
+        from ferumind.mcp.server import mcp
+
+        listed = anyio.run(mcp.list_tools)
+        offenders = [
+            tool.name
+            for tool in listed
+            if re.search(r"Returns \{|returns \{|\{[a-z_]+, [a-z_]+,", tool.description or "")
+        ]
+        assert not offenders, (
+            f"{offenders} enumerate their result fields in prose. That shape is already "
+            "in outputSchema, and a second copy is what drifts. Describe when to call "
+            "the tool and what the result means instead."
+        )
+
+    @pytest.mark.usefixtures("tools")
+    def test_all_four_result_paths_validate_for_every_tool(self) -> None:
+        """The schema must accept failures, not just the happy path.
+
+        ``convert_result`` validates ``structured_content`` on every result,
+        including ``is_error=True`` ones. A payload model that made ``data``
+        required would raise ``ToolError`` on each of the three failure
+        arms — and that exception quotes the rejected input, which is exactly
+        what ``tool_boundary`` exists to keep off the wire.
+
+        Driven through each tool's own ``output_model`` so a new tool is
+        covered without touching this test.
+        """
+        from ferumind.mcp.models import make_error, make_success
+        from ferumind.mcp.server import mcp
+
+        arms = {
+            "domain error": make_error("PROJECT_NOT_FOUND", "no such project", {"project": "x"}),
+            "sanitised crash": make_error(
+                "INTERNAL_ERROR",
+                "Ferumind encountered an unexpected internal error",
+                {"correlation_id": "fm_corr_deadbeef"},
+            ),
+            "rejected arguments": make_error(
+                "VALIDATION_ERROR", "Tool arguments do not match the declared input schema"
+            ),
+            "success with no payload": make_success(None, project="demo"),
+        }
+        failures: list[str] = []
+        for tool in registered_tools(mcp):
+            model = tool.fn_metadata.output_model
+            assert model is not None, f"{tool.name} has no output model"
+            for arm, result in arms.items():
+                try:
+                    model.model_validate(result.structured_content)
+                except Exception as exc:
+                    failures.append(f"{tool.name} rejects the {arm} arm: {type(exc).__name__}")
+        assert not failures, "\n".join(failures)
 
     @pytest.mark.usefixtures("tools")
     def test_envelope_survives_conversion_on_success_and_error(self) -> None:
@@ -1228,11 +1738,11 @@ class TestWireLevelConversion:
 
         created, missing = anyio.run(scenario)
         assert isinstance(created, CallToolResult)
-        assert created.isError is False
-        structured = cast("dict[str, Any]", created.structuredContent)
+        assert created.is_error is False
+        structured = cast("dict[str, Any]", created.structured_content)
         assert structured["ok"] is True
         assert cast("dict[str, Any]", structured["data"])["key"] == "demo"
         assert isinstance(missing, CallToolResult)
-        assert missing.isError is True
-        errored = cast("dict[str, Any]", missing.structuredContent)
+        assert missing.is_error is True
+        errored = cast("dict[str, Any]", missing.structured_content)
         assert errored["error_code"] == "PROJECT_NOT_FOUND"

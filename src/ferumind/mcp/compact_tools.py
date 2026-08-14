@@ -10,12 +10,23 @@ from mcp.types import CallToolResult
 from pydantic import BaseModel, Field
 
 from ferumind.core import compacts
+from ferumind.core.compacts import (
+    CompactMutationResult,
+    CompactReadResult,
+    CompactResumeResult,
+)
 from ferumind.core.errors import FerumindError, ValidationError
 from ferumind.core.paths import PathSafetyError
 from ferumind.core.registry import ProjectEntry
 from ferumind.core.types import JsonObject, JsonValue
-from ferumind.mcp.models import make_success, read_only_annotations, write_annotations
+from ferumind.mcp.models import (
+    FerumindResult,
+    make_success,
+    read_only_annotations,
+    write_annotations,
+)
 from ferumind.mcp.protocols import ToolRegistrar
+from ferumind.mcp.result_models import CompactInstructionsData, CompactListingData
 from ferumind.mcp.tool_context import (
     error_result,
     require_database,
@@ -23,8 +34,6 @@ from ferumind.mcp.tool_context import (
     require_workspace,
     scoped_project,
 )
-
-type FerumindToolResult = CallToolResult
 
 
 def _dump_model(model: BaseModel) -> JsonObject:
@@ -54,15 +63,16 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
         name="get_compact_instructions",
         title="Get Compact Instructions",
         description=(
-            "Return the procedure for creating a workspace-level Ferumind compact. "
-            "Use only when the user explicitly invokes `/compact`, `@ferumind /compact`, "
-            "or names a Ferumind compact. Do not use for ordinary project memory, "
-            "notes, summaries, or document updates."
+            "Return the procedure for creating a workspace-level Ferumind compact. Use "
+            "only when the user explicitly invokes `/compact`, `@ferumind /compact`, or "
+            "names a Ferumind compact. Do not use for ordinary project memory, notes, "
+            "summaries, or document updates."
         ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
-    def get_compact_instructions_tool() -> FerumindToolResult:
+    def get_compact_instructions_tool() -> Annotated[
+        CallToolResult, FerumindResult[CompactInstructionsData]
+    ]:
         try:
             require_format_gate().check_read()
             return make_success({"instructions": compacts.compact_instructions()})
@@ -73,11 +83,10 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
         name="create_compact_draft",
         title="Create Compact Draft",
         description=(
-            "Create a workspace-level compact draft under workspace/compacts/. "
-            "Use after get_compact_instructions when chunking a chat compact."
+            "Create a workspace-level compact draft under workspace/compacts/. Use after "
+            "get_compact_instructions when chunking a chat compact."
         ),
         annotations=write_annotations(),
-        structured_output=False,
     )
     def create_compact_draft_tool(
         project: Annotated[
@@ -89,7 +98,7 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
             Field(description="Source refs such as document paths, URLs, or user-visible labels"),
         ] = None,
         tags: Annotated[list[str] | None, Field(description="Optional compact tags")] = None,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[CompactMutationResult]]:
         try:
             require_format_gate().check_write()
             project_entry = _validate_optional_project(project)
@@ -113,11 +122,10 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
         name="append_compact_chunk",
         title="Append Compact Chunk",
         description=(
-            "Append an agent-produced chunk summary to a compact draft. The server "
-            "stores the chunk; the chat agent remains responsible for summarizing."
+            "Append an agent-produced chunk summary to a compact draft. The server stores "
+            "the chunk; the chat agent remains responsible for summarizing."
         ),
         annotations=write_annotations(),
-        structured_output=False,
     )
     def append_compact_chunk_tool(
         token: Annotated[str, Field(description="Four-word compact token")],
@@ -126,7 +134,7 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
             list[str] | None,
             Field(description="Additional source refs covered by this chunk"),
         ] = None,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[CompactMutationResult]]:
         try:
             require_format_gate().check_write()
             db = require_database()
@@ -149,11 +157,10 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
         name="finalize_compact",
         title="Finalize Compact",
         description=(
-            "Finalize a compact draft with the complete Markdown body. The body "
-            "must begin with the Handoff Prompt block containing handoff_prompt."
+            "Finalize a compact draft with the complete Markdown body. The body must begin "
+            "with the Handoff Prompt block containing handoff_prompt."
         ),
         annotations=write_annotations(),
-        structured_output=False,
     )
     def finalize_compact_tool(
         token: Annotated[str, Field(description="Four-word compact token")],
@@ -164,7 +171,7 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
         ],
         sources: Annotated[list[str] | None, Field(description="Final source refs")] = None,
         tags: Annotated[list[str] | None, Field(description="Final compact tags")] = None,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[CompactMutationResult]]:
         try:
             require_format_gate().check_write()
             db = require_database()
@@ -190,11 +197,10 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
         title="Read Compact",
         description="Read a workspace-level compact by its four-word token.",
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def read_compact_tool(
         token: Annotated[str, Field(description="Four-word compact token")],
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[CompactReadResult]]:
         try:
             require_format_gate().check_read()
             result = compacts.read_compact(require_workspace(), token=token)
@@ -206,11 +212,10 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
         name="resume_compact",
         title="Resume Compact",
         description=(
-            "Resume a workspace-level compact by token. Verifies integrity, "
-            "increments resume_count, and returns the handoff prompt and body."
+            "Resume a workspace-level compact by token. Verifies integrity, increments "
+            "resume_count, and returns the handoff prompt and body."
         ),
         annotations=write_annotations(),
-        structured_output=False,
     )
     def resume_compact_tool(
         token: Annotated[str, Field(description="Four-word compact token")],
@@ -218,7 +223,7 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
             bool,
             Field(description="Set compact state to archived immediately after resume"),
         ] = False,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[CompactResumeResult]]:
         try:
             require_format_gate().check_write()
             db = require_database()
@@ -241,7 +246,6 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
         title="List Compacts",
         description="List workspace-level compact metadata; bodies are not included.",
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def list_compacts_tool(
         state: Annotated[str | None, Field(description="Optional compact state filter")] = None,
@@ -257,7 +261,7 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
                 le=compacts.MAX_COMPACT_LIST_LIMIT,
             ),
         ] = 50,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[CompactListingData]]:
         try:
             require_format_gate().check_read()
             project_entry = _validate_optional_project(project)
@@ -277,11 +281,10 @@ def register_compact_tools(mcp: ToolRegistrar) -> None:
         title="Archive Compact",
         description="Archive a workspace-level compact by setting state: archived. No hard delete.",
         annotations=write_annotations(),
-        structured_output=False,
     )
     def archive_compact_tool(
         token: Annotated[str, Field(description="Four-word compact token")],
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[CompactMutationResult]]:
         try:
             require_format_gate().check_write()
             db = require_database()

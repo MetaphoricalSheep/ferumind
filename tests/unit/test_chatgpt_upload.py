@@ -2,7 +2,7 @@
 ChatGPT's openai/fileParams file references, with per-file partial-success semantics.
 
 The actual SSRF-hardened HTTP fetch is exercised in test_remote_fetch.py;
-these tests monkeypatch ferumind.core.writes.fetch_remote_file so batch
+these tests monkeypatch ferumind.core.upload_writes.fetch_remote_file so batch
 orchestration (per-file error isolation, filename/mime handling, dedup
 non-claim) can be tested without any network layer at all.
 """
@@ -19,7 +19,7 @@ from unittest import mock
 import pytest
 from pydantic import ValidationError as PydanticValidationError
 
-from ferumind.core import writes
+from ferumind.core import upload_writes
 from ferumind.core.errors import (
     DocumentExistsError,
     DownloadFailedError,
@@ -28,7 +28,7 @@ from ferumind.core.errors import (
     ValidationError,
 )
 from ferumind.core.paths import WorkspaceRoot
-from ferumind.core.writes import ChatGPTFileInput, upload_library_files_from_chatgpt
+from ferumind.core.upload_writes import ChatGPTFileInput, upload_library_files_from_chatgpt
 from ferumind.db.database import Database
 
 
@@ -55,7 +55,7 @@ class TestChatGPTBatchUpload:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map(
                 {
@@ -102,7 +102,7 @@ class TestChatGPTBatchUpload:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map(
                 {
@@ -149,9 +149,9 @@ class TestChatGPTBatchUpload:
         project: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(writes, "MAX_CHATGPT_BATCH_BYTES", 5)
+        monkeypatch.setattr(upload_writes, "MAX_CHATGPT_BATCH_BYTES", 5)
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map(
                 {
@@ -192,12 +192,12 @@ class TestChatGPTBatchUpload:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         clock = iter([100.0, 161.0])
-        monkeypatch.setattr("ferumind.core.writes.time.monotonic", lambda: next(clock))
+        monkeypatch.setattr("ferumind.core.upload_writes.time.monotonic", lambda: next(clock))
 
         def never_fetch(_url: str, **_kwargs: object) -> bytes:
             pytest.fail("expired aggregate budget must be checked before fetching")
 
-        monkeypatch.setattr(writes, "fetch_remote_file", never_fetch)
+        monkeypatch.setattr(upload_writes, "fetch_remote_file", never_fetch)
         result = upload_library_files_from_chatgpt(
             conn,
             workspace,
@@ -222,7 +222,7 @@ class TestChatGPTBatchUpload:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map({"https://chatgpt.example/x": b"\xff\xd8\xff"}),
         )
@@ -249,7 +249,9 @@ class TestChatGPTBatchUpload:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            writes, "fetch_remote_file", _fake_fetch_map({"https://chatgpt.example/x": b"data"})
+            upload_writes,
+            "fetch_remote_file",
+            _fake_fetch_map({"https://chatgpt.example/x": b"data"}),
         )
         result = upload_library_files_from_chatgpt(
             conn,
@@ -281,7 +283,7 @@ class TestChatGPTBatchUpload:
             fetched.append(url)
             return b"good"
 
-        monkeypatch.setattr(writes, "fetch_remote_file", fake_fetch)
+        monkeypatch.setattr(upload_writes, "fetch_remote_file", fake_fetch)
         result = upload_library_files_from_chatgpt(
             conn,
             workspace,
@@ -316,7 +318,7 @@ class TestChatGPTBatchUpload:
         filename: str,
     ) -> None:
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map({"https://chatgpt.example/x": b"#!/bin/sh"}),
         )
@@ -340,11 +342,13 @@ class TestChatGPTBatchUpload:
         project: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        writes.upload_library_file(
+        upload_writes.upload_library_file(
             conn, workspace, project, filename="taken.txt", content_base64="dGFrZW4="
         )
         monkeypatch.setattr(
-            writes, "fetch_remote_file", _fake_fetch_map({"https://chatgpt.example/x": b"new"})
+            upload_writes,
+            "fetch_remote_file",
+            _fake_fetch_map({"https://chatgpt.example/x": b"new"}),
         )
         result = upload_library_files_from_chatgpt(
             conn,
@@ -367,7 +371,7 @@ class TestChatGPTBatchUpload:
     ) -> None:
         """Idempotency is explicitly NOT claimed — resending the same file_id is not deduped."""
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map(
                 {
@@ -405,7 +409,7 @@ class TestChatGPTBatchUpload:
         project: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(writes, "MAX_CHATGPT_FILES_PER_CALL", 2)
+        monkeypatch.setattr(upload_writes, "MAX_CHATGPT_FILES_PER_CALL", 2)
         with pytest.raises(ValidationError):
             upload_library_files_from_chatgpt(
                 conn,
@@ -437,7 +441,9 @@ class TestChatGPTBatchUpload:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            writes, "fetch_remote_file", _fake_fetch_map({"https://chatgpt.example/x": b"data"})
+            upload_writes,
+            "fetch_remote_file",
+            _fake_fetch_map({"https://chatgpt.example/x": b"data"}),
         )
         result = upload_library_files_from_chatgpt(
             conn,
@@ -461,7 +467,7 @@ class TestChatGPTSingleFileIdentity:
     These are the identity tests for ChatGPT uploads. The batch tool takes
     no caller-supplied names precisely because ``openai/fileParams`` gives
     the model no stable per-file handle to bind one to (the host fills the
-    parameter in after the model writes the call), so the only safe way to
+    parameter in after the model upload_writes the call), so the only safe way to
     choose a destination filename is one file per call. Each test below
     perturbs something a positional-mapping implementation would get wrong —
     argument order, completion order, duplicate names, identical content,
@@ -478,9 +484,11 @@ class TestChatGPTSingleFileIdentity:
     ) -> None:
         """(1) The name comes from the caller's argument, never from the resolved reference."""
         monkeypatch.setattr(
-            writes, "fetch_remote_file", _fake_fetch_map({"https://chatgpt.example/x": b"bytes X"})
+            upload_writes,
+            "fetch_remote_file",
+            _fake_fetch_map({"https://chatgpt.example/x": b"bytes X"}),
         )
-        result = writes.upload_library_file_from_chatgpt(
+        result = upload_writes.upload_library_file_from_chatgpt(
             conn,
             workspace,
             project,
@@ -513,12 +521,12 @@ class TestChatGPTSingleFileIdentity:
             first_started.wait(timeout=10)
             return b"fast bytes"
 
-        results: dict[str, writes.ChatGPTSingleUploadResult | BaseException] = {}
+        results: dict[str, upload_writes.ChatGPTSingleUploadResult | BaseException] = {}
 
         def upload(label: str, url: str, filename: str) -> None:
             conn = database.get_connection()
             try:
-                results[label] = writes.upload_library_file_from_chatgpt(
+                results[label] = upload_writes.upload_library_file_from_chatgpt(
                     conn,
                     workspace,
                     project,
@@ -532,7 +540,7 @@ class TestChatGPTSingleFileIdentity:
             finally:
                 conn.close()
 
-        with mock.patch.object(writes, "fetch_remote_file", fake_fetch):
+        with mock.patch.object(upload_writes, "fetch_remote_file", fake_fetch):
             slow = threading.Thread(
                 target=upload, args=("slow", "https://chatgpt.example/slow", "first-called.bin")
             )
@@ -562,7 +570,7 @@ class TestChatGPTSingleFileIdentity:
     ) -> None:
         """(3) Identical ChatGPT-suggested names; the caller's names disambiguate."""
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map(
                 {
@@ -575,7 +583,7 @@ class TestChatGPTSingleFileIdentity:
             ("https://chatgpt.example/a", "file_a", "relaxed-01-front.jpg"),
             ("https://chatgpt.example/b", "file_b", "relaxed-01-back.jpg"),
         ):
-            writes.upload_library_file_from_chatgpt(
+            upload_writes.upload_library_file_from_chatgpt(
                 conn,
                 workspace,
                 project,
@@ -595,18 +603,18 @@ class TestChatGPTSingleFileIdentity:
         """(4) Same bytes, different opaque ids — content hash is not an identity."""
         same = b"byte-for-byte identical"
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map({"https://chatgpt.example/1": same, "https://chatgpt.example/2": same}),
         )
-        first = writes.upload_library_file_from_chatgpt(
+        first = upload_writes.upload_library_file_from_chatgpt(
             conn,
             workspace,
             project,
             file=ChatGPTFileInput(download_url="https://chatgpt.example/1", file_id="file_one"),
             filename="copy-one.bin",
         )
-        second = writes.upload_library_file_from_chatgpt(
+        second = upload_writes.upload_library_file_from_chatgpt(
             conn,
             workspace,
             project,
@@ -634,12 +642,12 @@ class TestChatGPTSingleFileIdentity:
     ) -> None:
         """(5) With one file there is no partial success to report — it is a plain error."""
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map({"https://chatgpt.example/x": DownloadFailedError("network down")}),
         )
         with pytest.raises(DownloadFailedError):
-            writes.upload_library_file_from_chatgpt(
+            upload_writes.upload_library_file_from_chatgpt(
                 conn,
                 workspace,
                 project,
@@ -661,7 +669,7 @@ class TestChatGPTSingleFileIdentity:
         and cannot be mismatched against a file. The set is asserted exactly
         so any future binding-shaped parameter still fails this test.
         """
-        signature = inspect.signature(writes.upload_library_file_from_chatgpt)
+        signature = inspect.signature(upload_writes.upload_library_file_from_chatgpt)
         assert set(signature.parameters) == {
             "conn",
             "workspace_root",
@@ -687,13 +695,13 @@ class TestChatGPTSingleFileIdentity:
         ``download_url``; the URL is transport, never identity.
         """
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map(
                 {"https://cdn.example/rewritten/opaque-token-9f2b?sig=abc": b"the real bytes"}
             ),
         )
-        result = writes.upload_library_file_from_chatgpt(
+        result = upload_writes.upload_library_file_from_chatgpt(
             conn,
             workspace,
             project,
@@ -718,11 +726,11 @@ class TestChatGPTSingleFileIdentity:
     ) -> None:
         """(10) file_id survives into both the result and the metadata sidecar."""
         monkeypatch.setattr(
-            writes,
+            upload_writes,
             "fetch_remote_file",
             _fake_fetch_map({"https://chatgpt.example/x": b"traceable"}),
         )
-        result = writes.upload_library_file_from_chatgpt(
+        result = upload_writes.upload_library_file_from_chatgpt(
             conn,
             workspace,
             project,
@@ -751,13 +759,15 @@ class TestChatGPTSingleFileValidation:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         monkeypatch.setattr(
-            writes, "fetch_remote_file", _fake_fetch_map({"https://chatgpt.example/x": b"new"})
+            upload_writes,
+            "fetch_remote_file",
+            _fake_fetch_map({"https://chatgpt.example/x": b"new"}),
         )
-        writes.upload_library_file(
+        upload_writes.upload_library_file(
             conn, workspace, project, filename="taken.txt", content_base64="dGFrZW4="
         )
         with pytest.raises(DocumentExistsError):
-            writes.upload_library_file_from_chatgpt(
+            upload_writes.upload_library_file_from_chatgpt(
                 conn,
                 workspace,
                 project,
@@ -778,9 +788,9 @@ class TestChatGPTSingleFileValidation:
         def never_called(url: str, **kwargs: object) -> bytes:
             raise AssertionError("download must not be attempted for an invalid filename")
 
-        monkeypatch.setattr(writes, "fetch_remote_file", never_called)
+        monkeypatch.setattr(upload_writes, "fetch_remote_file", never_called)
         with pytest.raises(ValidationError):
-            writes.upload_library_file_from_chatgpt(
+            upload_writes.upload_library_file_from_chatgpt(
                 conn,
                 workspace,
                 project,
@@ -802,9 +812,9 @@ class TestChatGPTSingleFileValidation:
         def never_called(url: str, **kwargs: object) -> bytes:
             raise AssertionError("download must not be attempted for a blocked extension")
 
-        monkeypatch.setattr(writes, "fetch_remote_file", never_called)
+        monkeypatch.setattr(upload_writes, "fetch_remote_file", never_called)
         with pytest.raises(UnsupportedFileTypeError):
-            writes.upload_library_file_from_chatgpt(
+            upload_writes.upload_library_file_from_chatgpt(
                 conn,
                 workspace,
                 project,
@@ -816,7 +826,7 @@ class TestChatGPTSingleFileValidation:
         self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
     ) -> None:
         with pytest.raises(UnknownFolderError):
-            writes.upload_library_file_from_chatgpt(
+            upload_writes.upload_library_file_from_chatgpt(
                 conn,
                 workspace,
                 project,

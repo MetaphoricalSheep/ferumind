@@ -18,7 +18,11 @@ from typing import Final
 
 from PIL import Image, ImageOps, UnidentifiedImageError
 
-from ferumind.core.errors import FileTooLargeError, ValidationError
+from ferumind.core.errors import (
+    FileTooLargeError,
+    RenditionTooLargeError,
+    ValidationError,
+)
 from ferumind.core.types import StrictModel
 
 #: Longest-edge bounds for a context rendition. 1024 px retains useful
@@ -44,6 +48,19 @@ DEFAULT_IMAGE_QUALITY: Final = 78
 #: boundary. This is a generated rendition limit, not an original resource
 #: limit.
 MAX_IMAGE_RENDITION_BYTES: Final = 64 * 1024
+
+#: A rendition exists to *bound* an original, so it must never be larger
+#: than the original it stands in for. Re-encoding can inflate: a source
+#: already saved at low quality, or squeezed by a better PNG optimizer than
+#: Pillow's, comes back bigger at the same geometry. The per-file ceiling is
+#: therefore the original's own size, not just the constant above.
+#:
+#: Below this floor the rule is dropped, because it stops meaning anything:
+#: JPEG and PNG containers cost a fixed few hundred bytes whatever the
+#: pixels, so a 200-byte icon *cannot* be re-encoded smaller, and refusing to
+#: render it would trade a real capability for a saving of a few kilobytes.
+#: The floor caps how much a rendition may ever exceed its original.
+MIN_RENDITION_BYTE_CEILING: Final = 8 * 1024
 
 #: Prefer spatial downscaling to severe JPEG artifacts. An explicit caller
 #: request below this value is still honored; otherwise adaptive fitting
@@ -124,22 +141,34 @@ def _encode_png(image: Image.Image) -> bytes:
     return buffer.getvalue()
 
 
-def _next_edge(current_edge: int, encoded_bytes: int) -> int:
+def rendition_ceiling(original_size_bytes: int) -> int:
+    """The effective encoded-byte ceiling for one source file.
+
+    Never above :data:`MAX_IMAGE_RENDITION_BYTES`, never above the original's
+    own size, and never below :data:`MIN_RENDITION_BYTE_CEILING` — see those
+    constants for why each bound exists.
+    """
+    return max(MIN_RENDITION_BYTE_CEILING, min(MAX_IMAGE_RENDITION_BYTES, original_size_bytes))
+
+
+def _next_edge(current_edge: int, encoded_bytes: int, ceiling: int) -> int:
     """Choose a smaller edge using encoded area as a conservative guide."""
-    size_ratio = (MAX_IMAGE_RENDITION_BYTES / encoded_bytes) ** 0.5
+    size_ratio = (ceiling / encoded_bytes) ** 0.5
     candidate = int(current_edge * min(0.85, size_ratio * 0.95))
     return max(_MIN_ADAPTIVE_IMAGE_EDGE, min(current_edge - 1, candidate))
 
 
-def _best_jpeg_at_current_size(image: Image.Image, requested_quality: int) -> tuple[bytes, int]:
+def _best_jpeg_at_current_size(
+    image: Image.Image, requested_quality: int, ceiling: int
+) -> tuple[bytes, int]:
     """Return the highest-quality JPEG that fits, or the minimum-quality attempt."""
     requested = _encode_jpeg(image, requested_quality)
-    if len(requested) <= MAX_IMAGE_RENDITION_BYTES:
+    if len(requested) <= ceiling:
         return requested, requested_quality
 
     quality_floor = min(requested_quality, _MIN_ADAPTIVE_JPEG_QUALITY)
     minimum = _encode_jpeg(image, quality_floor)
-    if len(minimum) > MAX_IMAGE_RENDITION_BYTES:
+    if len(minimum) > ceiling:
         return minimum, quality_floor
 
     best_data = minimum
@@ -149,7 +178,7 @@ def _best_jpeg_at_current_size(image: Image.Image, requested_quality: int) -> tu
     while low <= high:
         candidate_quality = (low + high) // 2
         candidate = _encode_jpeg(image, candidate_quality)
-        if len(candidate) <= MAX_IMAGE_RENDITION_BYTES:
+        if len(candidate) <= ceiling:
             best_data = candidate
             best_quality = candidate_quality
             low = candidate_quality + 1
@@ -171,13 +200,19 @@ def render_image_context(
     survives; everything else becomes JPEG. All metadata (EXIF, ICC, XMP) is
     dropped — the rendition is a viewing copy, not a replacement original.
 
+    The encoded result is held under :func:`rendition_ceiling` for this
+    source, so a rendition is never larger than the original it bounds.
+
     A file that is not a decodable raster image raises
     :class:`ValidationError`; an image whose declared geometry exceeds
-    :data:`MAX_DECODED_PIXELS` raises :class:`FileTooLargeError`. Neither
-    condition escapes as an unhandled Pillow exception.
+    :data:`MAX_DECODED_PIXELS` raises :class:`FileTooLargeError`; a source
+    that cannot be encoded under its ceiling at any supported geometry
+    raises :class:`RenditionTooLargeError`. None of these escape as an
+    unhandled Pillow exception.
     """
     edge = clamp_edge(max_edge)
     encode_quality = clamp_quality(quality)
+    ceiling = rendition_ceiling(source.stat().st_size)
 
     try:
         # ``Image.open`` is lazy and the context manager owns the file
@@ -214,15 +249,15 @@ def render_image_context(
             try:
                 if use_png:
                     data = _encode_png(encoded)
-                    size_limited = len(data) > MAX_IMAGE_RENDITION_BYTES
-                    while len(data) > MAX_IMAGE_RENDITION_BYTES:
+                    size_limited = len(data) > ceiling
+                    while len(data) > ceiling:
                         current_edge = max(encoded.size)
                         if current_edge <= _MIN_ADAPTIVE_IMAGE_EDGE:
-                            raise FileTooLargeError(
+                            raise RenditionTooLargeError(
                                 "Image rendition could not fit the context byte limit",
-                                details={"limit_bytes": MAX_IMAGE_RENDITION_BYTES},
+                                details={"limit_bytes": ceiling},
                             )
-                        next_edge = _next_edge(current_edge, len(data))
+                        next_edge = _next_edge(current_edge, len(data), ceiling)
                         encoded.thumbnail(
                             (next_edge, next_edge),
                             Image.Resampling.LANCZOS,
@@ -231,23 +266,25 @@ def render_image_context(
                     mime_type = PNG_MIME_TYPE
                     actual_quality = None
                 else:
-                    data, actual_quality = _best_jpeg_at_current_size(encoded, encode_quality)
-                    size_limited = (
-                        len(data) > MAX_IMAGE_RENDITION_BYTES or actual_quality != encode_quality
+                    data, actual_quality = _best_jpeg_at_current_size(
+                        encoded, encode_quality, ceiling
                     )
-                    while len(data) > MAX_IMAGE_RENDITION_BYTES:
+                    size_limited = len(data) > ceiling or actual_quality != encode_quality
+                    while len(data) > ceiling:
                         current_edge = max(encoded.size)
                         if current_edge <= _MIN_ADAPTIVE_IMAGE_EDGE:
-                            raise FileTooLargeError(
+                            raise RenditionTooLargeError(
                                 "Image rendition could not fit the context byte limit",
-                                details={"limit_bytes": MAX_IMAGE_RENDITION_BYTES},
+                                details={"limit_bytes": ceiling},
                             )
-                        next_edge = _next_edge(current_edge, len(data))
+                        next_edge = _next_edge(current_edge, len(data), ceiling)
                         encoded.thumbnail(
                             (next_edge, next_edge),
                             Image.Resampling.LANCZOS,
                         )
-                        data, actual_quality = _best_jpeg_at_current_size(encoded, encode_quality)
+                        data, actual_quality = _best_jpeg_at_current_size(
+                            encoded, encode_quality, ceiling
+                        )
                     mime_type = JPEG_MIME_TYPE
                 width, height = encoded.size
             finally:

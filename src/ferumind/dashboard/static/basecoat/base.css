@@ -1,0 +1,53 @@
+/*
+ * basecoat — base layer (resets + element defaults that read from tokens)
+ * ----------------------------------------------------------------------------
+ * Minimal, modern resets and the page-level defaults. Kept in @layer base so app
+ * and component styles win without specificity battles. Motion is opt-in per use
+ * and always guarded by prefers-reduced-motion — we add no !important reset here.
+ */
+@layer base {
+  *,
+  *::before,
+  *::after {
+    box-sizing: border-box;
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--bc-bg);
+    color: var(--bc-text);
+    font-family: var(--bc-font-sans);
+    font-size: 0.9375rem; /* ~15px base, per the reference scale */
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Media defaults to block + responsive to avoid inline-gap and layout shift. */
+  :where(img, svg, video, canvas) {
+    display: block;
+    max-inline-size: 100%;
+  }
+
+  :where(h1, h2, h3, h4) {
+    line-height: 1.2;
+    text-wrap: balance;
+  }
+
+  :where(a) {
+    color: var(--bc-accent);
+    text-underline-offset: 0.2em;
+  }
+
+  /* One visible, token-driven focus ring for the whole system. Never removed. */
+  :where(:focus-visible) {
+    outline: 2px solid var(--bc-accent);
+    outline-offset: 2px;
+    border-radius: var(--bc-radius-sm);
+  }
+}

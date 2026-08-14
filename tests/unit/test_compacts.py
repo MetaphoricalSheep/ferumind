@@ -13,8 +13,8 @@ from ferumind.core.compacts import CompactFrontmatter
 from ferumind.core.documents import compute_sha256
 from ferumind.core.errors import CompactIntegrityError, FrontmatterInvalidError, ValidationError
 from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.project_writes import create_project
 from ferumind.core.registry import load_registry, validate_project_key
-from ferumind.core.writes import create_project
 
 
 def _handoff_body(prompt: str) -> str:

@@ -1,0 +1,352 @@
+/*
+ * basecoat — signature component styling (shared by BOTH tiers)
+ * ----------------------------------------------------------------------------
+ * The look of each signature pattern lives here, in plain token-driven CSS, so a
+ * Tier 1 prototype and a Tier 2 React component are not just "similar" — they paint
+ * from the exact same rules. Tier 2 composes these classes via cva()/cn() and adds
+ * Tailwind utilities for layout; Tier 1 uses them directly.
+ *
+ * Tone is expressed through a single custom property, `--tone`. A tone modifier
+ * class sets it; every toned part (bar, dot, wash, text) derives from it via
+ * color-mix(). Components never hard-code a hue — change the tone, everything follows.
+ *
+ * Declare the layer order up front so these rules sit below Tailwind's utilities
+ * even when no Tailwind build has established the layers (e.g. a bare prototype).
+ */
+@layer theme, base, components, utilities;
+
+@layer components {
+  /* ── Tone modifiers (generic; any component reads var(--tone)) ─────────── */
+  .bc-tone-success {
+    --tone: var(--bc-tone-success);
+  }
+  .bc-tone-caution {
+    --tone: var(--bc-tone-caution);
+  }
+  .bc-tone-danger {
+    --tone: var(--bc-tone-danger);
+  }
+  .bc-tone-neutral {
+    --tone: var(--bc-tone-neutral);
+  }
+
+  /* ── Typography helpers ────────────────────────────────────────────────── */
+  .bc-eyebrow {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    line-height: 1.3;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--bc-text-muted);
+  }
+
+  .bc-metric {
+    font-size: clamp(1.75rem, 1.2rem + 2vw, 2.5rem);
+    font-weight: 700;
+    line-height: 1.05;
+    color: var(--bc-text);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+
+  /* ── Status dot: filled dot inside a soft glowing ring (the recurring motif) */
+  .bc-dot {
+    --_tone: var(--tone, var(--bc-tone-neutral));
+    display: inline-block;
+    inline-size: 0.625rem;
+    block-size: 0.625rem;
+    flex: none;
+    border-radius: var(--bc-radius-full);
+    background: var(--_tone);
+    box-shadow:
+      0 0 0 0.25rem color-mix(in oklab, var(--_tone) 22%, transparent),
+      0 0 0.5rem 0 color-mix(in oklab, var(--_tone) 55%, transparent);
+  }
+
+  /*
+   * Live status dot: same dot, but a ring pulses outward to signal a running/live
+   * process. Attaches exactly like .bc-dot (inherits the ambient --tone). The ping is
+   * a separate pseudo-element so it's GPU-cheap; motion is gated by prefers-reduced-
+   * motion, where it falls back to the static glow so "live" still reads.
+   */
+  .bc-dot-live {
+    --_tone: var(--tone, var(--bc-tone-neutral));
+    position: relative;
+    display: inline-block;
+    inline-size: 0.625rem;
+    block-size: 0.625rem;
+    flex: none;
+    border-radius: var(--bc-radius-full);
+    background: var(--_tone);
+    box-shadow: 0 0 0.4rem 0 color-mix(in oklab, var(--_tone) 55%, transparent);
+  }
+  .bc-dot-live::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: var(--_tone);
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .bc-dot-live::after {
+      animation: bc-dot-ping 1.8s cubic-bezier(0, 0, 0.2, 1) infinite;
+    }
+  }
+  @keyframes bc-dot-ping {
+    0% {
+      transform: scale(1);
+      opacity: 0.55;
+    }
+    100% {
+      transform: scale(2.6);
+      opacity: 0;
+    }
+  }
+
+  /* ── Panel: the premium dashboard container ────────────────────────────── */
+  .bc-panel {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    padding: clamp(1.25rem, 0.9rem + 1.4vw, 2rem);
+    background: var(--bc-surface);
+    border: 1px solid var(--bc-border);
+    border-radius: var(--bc-radius-lg);
+    box-shadow: var(--bc-shadow-panel);
+  }
+  /* Thin multi-color gradient strip along the top edge. */
+  .bc-panel::before {
+    content: "";
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline: 0;
+    block-size: 2px;
+    background: linear-gradient(
+      90deg,
+      var(--bc-cycle-1),
+      var(--bc-cycle-2),
+      var(--bc-cycle-3),
+      var(--bc-cycle-4),
+      var(--bc-cycle-5)
+    );
+  }
+  /* Faint radial color glows in the corners. */
+  .bc-panel::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        38rem 16rem at 0% 0%,
+        color-mix(in oklab, var(--bc-accent) 12%, transparent),
+        transparent 60%
+      ),
+      radial-gradient(
+        38rem 16rem at 100% 0%,
+        color-mix(in oklab, var(--bc-accent-violet) 10%, transparent),
+        transparent 60%
+      );
+  }
+
+  /* ── Stat tile: inset surface, thin left bar, eyebrow label, big value ─── */
+  .bc-stat {
+    --_bar: var(--bar, var(--bc-accent));
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    /* Pack rows at the top so values align across a stretched row. */
+    align-content: start;
+    gap: 0.5rem;
+    padding: 1rem 1.25rem;
+    /* A faint corner glow in the bar color + soft shadow, echoing the Panel. */
+    background:
+      radial-gradient(
+        20rem 9rem at 0% 0%,
+        color-mix(in oklab, var(--_bar) 9%, transparent),
+        transparent 70%
+      ),
+      var(--bc-surface-inset);
+    border: 1px solid var(--bc-border);
+    border-radius: var(--bc-radius-md);
+    box-shadow: var(--bc-shadow-card);
+  }
+  .bc-stat::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    inline-size: 3px;
+    background: var(--_bar);
+  }
+  .bc-stat__value {
+    font-size: clamp(1.5rem, 1.1rem + 1.6vw, 2.25rem);
+    font-weight: 700;
+    line-height: 1.05;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    color: var(--bc-text);
+  }
+  /* Optional: tint the value to match its bar. */
+  .bc-stat--tinted .bc-stat__value {
+    color: var(--_bar);
+  }
+
+  /*
+   * In a row, the left-bar color cycles through the accent hues automatically.
+   * Both tiers render tiles inside .bc-stat-row, so the cycle is identical and
+   * needs no JS. An explicit inline `--bar` (set per tile) overrides the cycle.
+   */
+  .bc-stat-row > .bc-stat:nth-child(5n + 1) {
+    --bar: var(--bc-cycle-1);
+  }
+  .bc-stat-row > .bc-stat:nth-child(5n + 2) {
+    --bar: var(--bc-cycle-2);
+  }
+  .bc-stat-row > .bc-stat:nth-child(5n + 3) {
+    --bar: var(--bc-cycle-3);
+  }
+  .bc-stat-row > .bc-stat:nth-child(5n + 4) {
+    --bar: var(--bc-cycle-4);
+  }
+  .bc-stat-row > .bc-stat:nth-child(5n + 5) {
+    --bar: var(--bc-cycle-5);
+  }
+
+  /* ── Status card: left bar encodes a semantic tone ─────────────────────── */
+  .bc-status-card {
+    --_tone: var(--tone, var(--bc-tone-neutral));
+    position: relative;
+    overflow: hidden;
+    display: grid;
+    /* Pack rows at the top so the status line aligns across a stretched row. */
+    align-content: start;
+    gap: 0.5rem;
+    padding: 1.125rem 1.25rem;
+    /* A tone wash + corner glow + soft shadow make this a mini-Panel. */
+    background:
+      radial-gradient(
+        26rem 12rem at 100% 0%,
+        color-mix(in oklab, var(--_tone) 10%, transparent),
+        transparent 70%
+      ),
+      var(--bc-surface-inset);
+    border: 1px solid color-mix(in oklab, var(--_tone) 16%, var(--bc-border));
+    border-radius: var(--bc-radius-md);
+    box-shadow: var(--bc-shadow-card);
+  }
+  .bc-status-card::before {
+    content: "";
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    inline-size: 3px;
+    background: var(--_tone);
+  }
+  .bc-status-card__status {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-weight: 600;
+    color: var(--_tone);
+  }
+  .bc-status-card__copy {
+    margin: 0;
+    font-size: 0.8125rem;
+    line-height: 1.5;
+    color: var(--bc-text-muted);
+  }
+
+  /* ── Chip / badge: flat, fully-rounded, solid tone fill + bold name + count ─ */
+  .bc-chip {
+    --_tone: var(--tone, var(--bc-tone-neutral));
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    padding-block: 0.25rem;
+    padding-inline: 0.625rem;
+    border-radius: var(--bc-radius-full);
+    /* Intentionally flat: solid tone fill, no border or glow, just a light shadow.
+       Our tones are light, so dark ink (not white) carries the AA contrast. */
+    background: var(--_tone);
+    color: var(--bc-on-tone);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    line-height: 1.2;
+    white-space: nowrap;
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.25);
+  }
+  .bc-chip__count {
+    /* Same ink as the label (so it clears AA on every tone fill); set apart by a
+       lighter weight rather than a lower-contrast color. */
+    color: var(--bc-on-tone);
+    font-weight: 400;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ── Progress: an inset track with a brand-gradient fill (the Panel-strip hues) ─ */
+  .bc-progress {
+    --_tone: var(--tone, var(--bc-accent));
+    position: relative;
+    overflow: hidden;
+    block-size: 0.5rem;
+    inline-size: 100%;
+    border-radius: var(--bc-radius-full);
+    background: var(--bc-surface-inset);
+    border: 1px solid var(--bc-border);
+  }
+  .bc-progress__fill {
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    /* The same multi-color strip as the top of a Panel. It spans the whole track and
+       is clipped to the value, so the visible portion is always the left of the
+       gradient (teal → blue → violet → …) regardless of how full the bar is. */
+    background: linear-gradient(
+      90deg,
+      var(--bc-cycle-1),
+      var(--bc-cycle-2),
+      var(--bc-cycle-3),
+      var(--bc-cycle-4),
+      var(--bc-cycle-5)
+    );
+    clip-path: inset(0 calc(100% - var(--value, 0%)) 0 0 round var(--bc-radius-full));
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .bc-progress__fill {
+      transition: clip-path var(--bc-duration) var(--bc-ease);
+    }
+  }
+
+  /* Solid single-tone fill instead of the gradient. */
+  .bc-progress--tone .bc-progress__fill {
+    background: var(--_tone);
+  }
+
+  /* Indeterminate: a sliver slides across (busy, value unknown). */
+  .bc-progress--indeterminate .bc-progress__fill {
+    inline-size: 40%;
+    clip-path: none;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .bc-progress--indeterminate .bc-progress__fill {
+      animation: bc-progress-slide 1.4s ease-in-out infinite;
+    }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    /* No motion: show a steady, muted full bar so it still reads as "busy". */
+    .bc-progress--indeterminate .bc-progress__fill {
+      inline-size: 100%;
+      opacity: 0.5;
+    }
+  }
+  @keyframes bc-progress-slide {
+    0% {
+      transform: translateX(-100%);
+    }
+    100% {
+      transform: translateX(250%);
+    }
+  }
+}

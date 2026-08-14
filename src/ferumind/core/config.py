@@ -7,9 +7,10 @@ user-configurable.
 
 from __future__ import annotations
 
+import math
 import os
 from pathlib import Path
-from typing import Literal, cast
+from typing import Final, Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -22,6 +23,12 @@ from ferumind.core.images import (
 )
 
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+
+#: One megabyte, binary. ``FERUMIND_MAX_RESOURCE_MB`` is stated in these
+#: because the limit it describes — the OpenAI tunnel control plane's 10 MiB
+#: ceiling — is itself binary. Decimal megabytes would put the default
+#: 485,760 bytes below that ceiling for no reason.
+BYTES_PER_MB: Final = 1024 * 1024
 
 
 class Config(BaseModel):
@@ -42,13 +49,17 @@ class Config(BaseModel):
     image_max_edge: int = Field(default=2560, ge=MIN_STORAGE_EDGE, le=MAX_STORAGE_EDGE)
     image_jpeg_quality: int = Field(default=85, ge=MIN_STORAGE_QUALITY, le=MAX_STORAGE_QUALITY)
 
-    #: Largest response body a caller's transport will carry. The OpenAI
-    #: tunnel control plane rejects anything above 10 MiB with HTTP 413, and
-    #: that rejection kills the stdio child, so ``resources/read`` refuses
-    #: oversized originals up front rather than emitting an undeliverable
-    #: reply. Blob payloads are base64-encoded, so the usable original size is
-    #: three quarters of this value.
-    max_resource_response_bytes: int = Field(default=10 * 1024 * 1024, ge=64 * 1024)
+    #: Largest response body a caller's transport will carry, in bytes. The
+    #: OpenAI tunnel control plane rejects anything above 10 MiB with HTTP
+    #: 413, and that rejection kills the stdio child, so ``resources/read``
+    #: refuses oversized originals up front rather than emitting an
+    #: undeliverable reply. Blob payloads are base64-encoded, so the usable
+    #: original size is three quarters of this value.
+    #:
+    #: Configured as ``FERUMIND_MAX_RESOURCE_MB`` because a transport ceiling
+    #: is something people reason about in megabytes; the conversion happens
+    #: at the environment boundary and everything inside stays in bytes.
+    max_resource_response_bytes: int = Field(default=10 * BYTES_PER_MB, ge=64 * 1024)
 
     @property
     def image_policy(self) -> ImagePolicy:
@@ -77,6 +88,27 @@ def _env_int(name: str) -> int | None:
         return int(raw)
     except ValueError as exc:
         raise ValueError(f"{name} must be an integer, got {raw!r}") from exc
+
+
+def _env_mb_as_bytes(name: str) -> int | None:
+    """Parse a megabyte environment override into bytes.
+
+    Fractional values are accepted so the whole configurable range stays
+    reachable: the field floor is 64 KiB, which whole megabytes could not
+    express. Zero and negatives are rejected here rather than falling through
+    to the default, because a caller who writes ``=0`` means to forbid
+    something and should be told that is not a supported way to say it.
+    """
+    raw = _env_str(name)
+    if raw is None:
+        return None
+    try:
+        megabytes = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number of megabytes, got {raw!r}") from exc
+    if not math.isfinite(megabytes) or megabytes <= 0:
+        raise ValueError(f"{name} must be a positive number of megabytes, got {raw!r}")
+    return round(megabytes * BYTES_PER_MB)
 
 
 def _env_bool(name: str) -> bool | None:
@@ -108,7 +140,10 @@ def load_config(workspace: Path | None = None) -> Config:
     compression_enabled = _env_bool("FERUMIND_IMAGE_COMPRESSION")
     return Config(
         workspace_path=resolved_workspace or Path("./workspace"),
-        log_level=cast(LogLevel, _env_str("FERUMIND_LOG_LEVEL") or "INFO"),
+        # Case is incidental to a level name, so normalize it; anything that is
+        # still not a valid level fails Config validation here, before any
+        # command runs or the server starts serving.
+        log_level=cast(LogLevel, (_env_str("FERUMIND_LOG_LEVEL") or "INFO").strip().upper()),
         image_compression_enabled=(
             defaults.image_compression_enabled
             if compression_enabled is None
@@ -117,6 +152,6 @@ def load_config(workspace: Path | None = None) -> Config:
         image_max_edge=_env_int("FERUMIND_IMAGE_MAX_EDGE") or defaults.image_max_edge,
         image_jpeg_quality=_env_int("FERUMIND_IMAGE_JPEG_QUALITY") or defaults.image_jpeg_quality,
         max_resource_response_bytes=(
-            _env_int("FERUMIND_MAX_RESOURCE_BYTES") or defaults.max_resource_response_bytes
+            _env_mb_as_bytes("FERUMIND_MAX_RESOURCE_MB") or defaults.max_resource_response_bytes
         ),
     )
