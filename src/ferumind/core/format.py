@@ -1,7 +1,8 @@
 """Workspace format version marker and gate (product/spec-versioning.md §1).
 
-The workspace format lives in ``workspace/system/meta.yml`` (``format: 2``,
-whole-workspace granularity). The server supports exactly one format:
+The workspace format lives in ``workspace/system/meta.yml`` (``format: 3``,
+whole-workspace granularity). Format 3 requires a ``description`` on every
+managed document. The server supports exactly one format:
 
 - format == supported → reads and writes normal
 - format < supported (or marker missing) → reads allowed, writes refused
@@ -27,7 +28,7 @@ from ferumind.core.file_io import atomic_write_text
 from ferumind.core.paths import WorkspaceRoot, contained_path
 from ferumind.core.yaml_safe import safe_load_yaml
 
-SUPPORTED_FORMAT: Final = 2
+SUPPORTED_FORMAT: Final = 3
 
 _META_HEADER: Final = "# Ferumind workspace metadata. Managed by Ferumind; do not edit by hand.\n"
 MAX_FORMAT_MARKER_BYTES: Final = 16 * 1024
@@ -40,7 +41,8 @@ def meta_path(workspace: WorkspaceRoot) -> Path:
 def read_format(workspace: WorkspaceRoot) -> int | None:
     """Return the workspace format, or ``None`` when the marker is missing/unreadable.
 
-    A missing marker means a pre-format workspace (treated as format 1).
+    ``None`` means the format is unknown, not that it is old: callers must
+    not substitute a number for it.
     """
     path = meta_path(workspace)
     if not path.is_file():
@@ -129,13 +131,15 @@ class FormatGate:
         found = self.current_format()
         if found == self._supported:
             return
-        if found is not None and found > self._supported:
+        if found is None:
+            message = self._unmarked_message()
+        elif found > self._supported:
             message = self._newer_message(found)
         else:
             message = (
-                f"Workspace format {found if found is not None else 1} is older than "
-                f"the supported format {self._supported}; reads remain available, "
-                "writes are refused. Remedy: run `ferumind migrate`."
+                f"Workspace format {found} is older than the supported format "
+                f"{self._supported}; reads remain available, writes are refused. "
+                "Remedy: run `ferumind migrate`."
             )
         raise FormatUnsupportedError(
             message,
@@ -146,4 +150,18 @@ class FormatGate:
         return (
             f"Workspace format {found} is newer than the supported format "
             f"{self._supported}; refusing all access. Remedy: upgrade the Ferumind server."
+        )
+
+    def _unmarked_message(self) -> str:
+        """An unreadable marker is an uninitialized workspace, not an old one.
+
+        Naming a format the marker never stated would invent a number, and
+        pointing at ``ferumind migrate`` would name a remedy that cannot run:
+        there is no chain to resolve without a starting format.
+        """
+        return (
+            "No readable workspace format marker at system/meta.yml; this "
+            "directory is not an initialized Ferumind workspace, so writes are "
+            "refused. Remedy: initialize it with scripts/bootstrap_workspace.py, "
+            "or point FERUMIND_WORKSPACE at an existing workspace."
         )

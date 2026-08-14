@@ -11,7 +11,7 @@ metadata:
 
 ## Standards
 
-- Modern Python 3.12+ with full typing
+- Python 3.12-3.14 with full typing; Ruff and Pyright target the 3.12 floor
 - Small cohesive modules — no god files, no circular imports
 - Explicit module boundaries with clean `__all__` exports
 - Dependency inversion where useful — core has no framework leakage

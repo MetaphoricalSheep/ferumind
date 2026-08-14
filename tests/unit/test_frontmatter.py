@@ -1,4 +1,4 @@
-"""Tests for frontmatter v2 parsing, generation, and protected keys."""
+"""Tests for frontmatter parsing, generation, and protected keys."""
 
 from __future__ import annotations
 
@@ -6,7 +6,9 @@ import pytest
 
 from ferumind.core.errors import FrontmatterInvalidError
 from ferumind.core.frontmatter import (
+    MAX_DESCRIPTION_CHARS,
     PROTECTED_FRONTMATTER_KEYS,
+    FrontmatterBehavior,
     extract_frontmatter_block,
     generate_frontmatter,
     infer_title,
@@ -14,35 +16,69 @@ from ferumind.core.frontmatter import (
     parse_frontmatter,
     refresh_updated_if_managed,
     set_frontmatter_updated,
+    validate_description,
     validate_edit_policy,
     validate_status,
 )
+from tests.conftest import TEST_DESCRIPTION
 
 
 def test_generate_frontmatter_is_managed_and_parses_back() -> None:
-    fm = generate_frontmatter(doc_id="doc_abc", project_key="demo", title="A Plan")
+    fm = generate_frontmatter(
+        description=TEST_DESCRIPTION, doc_id="doc_abc", project_key="demo", title="A Plan"
+    )
     content = fm + "# A Plan\n"
     parsed = parse_frontmatter(content)
     assert parsed["id"] == "doc_abc"
     assert parsed["type"] == "document"
     assert parsed["project"] == "demo"
+    assert parsed["description"] == TEST_DESCRIPTION
     assert parsed["status"] == "active"
     assert "edit_policy" not in parsed
     assert is_managed_markdown(content)
 
 
+def test_description_validation_is_exact_and_bounded() -> None:
+    assert validate_description("  Useful navigation sentence.  ") == (
+        "Useful navigation sentence."
+    )
+    with pytest.raises(FrontmatterInvalidError, match="must be a string"):
+        validate_description(7)
+    for value in ("", "   \n\t"):
+        with pytest.raises(FrontmatterInvalidError, match="must not be empty"):
+            validate_description(value)
+    with pytest.raises(FrontmatterInvalidError, match="maximum"):
+        validate_description("x" * (MAX_DESCRIPTION_CHARS + 1))
+
+
 def test_generate_frontmatter_with_explicit_policy() -> None:
     fm = generate_frontmatter(
-        doc_id="doc_abc", project_key="demo", title="Rules", edit_policy="ask-human"
+        description=TEST_DESCRIPTION,
+        doc_id="doc_abc",
+        project_key="demo",
+        title="Rules",
+        behavior=FrontmatterBehavior(edit_policy="ask-human"),
     )
     assert parse_frontmatter(fm)["edit_policy"] == "ask-human"
 
 
 def test_generate_frontmatter_validates_inputs() -> None:
     with pytest.raises(FrontmatterInvalidError):
-        generate_frontmatter(doc_id="x", project_key="demo", title="t", status="bogus")
+        generate_frontmatter(
+            description=TEST_DESCRIPTION,
+            doc_id="x",
+            project_key="demo",
+            title="t",
+            behavior=FrontmatterBehavior(status="bogus"),
+        )
     with pytest.raises(FrontmatterInvalidError):
-        generate_frontmatter(doc_id="x", project_key="demo", title="t", edit_policy="bogus")
+        generate_frontmatter(
+            description=TEST_DESCRIPTION,
+            doc_id="x",
+            project_key="demo",
+            title="t",
+            behavior=FrontmatterBehavior(edit_policy="bogus"),
+        )
 
 
 @pytest.mark.parametrize("status", ["active", "gated", "frozen", "archived"])
@@ -98,7 +134,9 @@ def test_parse_frontmatter_rejects_yaml_aliases() -> None:
 
 
 def test_extract_frontmatter_block_round_trips() -> None:
-    fm = generate_frontmatter(doc_id="doc_x", project_key="p", title="T")
+    fm = generate_frontmatter(
+        description=TEST_DESCRIPTION, doc_id="doc_x", project_key="p", title="T"
+    )
     content = fm + "body line\n"
     block, body = extract_frontmatter_block(content)
     assert block == fm
@@ -107,7 +145,9 @@ def test_extract_frontmatter_block_round_trips() -> None:
 
 
 def test_set_frontmatter_updated_replaces_and_inserts() -> None:
-    fm = generate_frontmatter(doc_id="doc_x", project_key="p", title="T")
+    fm = generate_frontmatter(
+        description=TEST_DESCRIPTION, doc_id="doc_x", project_key="p", title="T"
+    )
     stamped = set_frontmatter_updated(fm, "2030-01-01T00:00:00+00:00")
     assert "updated: 2030-01-01T00:00:00+00:00" in stamped
     bare = "---\nid: doc_x\ntype: document\nproject: p\n---\n"
@@ -118,7 +158,9 @@ def test_set_frontmatter_updated_replaces_and_inserts() -> None:
 def test_refresh_updated_only_touches_managed_documents() -> None:
     unmanaged = "just some text\n"
     assert refresh_updated_if_managed(unmanaged) == unmanaged
-    fm = generate_frontmatter(doc_id="doc_x", project_key="p", title="T")
+    fm = generate_frontmatter(
+        description=TEST_DESCRIPTION, doc_id="doc_x", project_key="p", title="T"
+    )
     content = fm + "body\n"
     refreshed = refresh_updated_if_managed(content)
     assert refreshed.endswith("body\n")

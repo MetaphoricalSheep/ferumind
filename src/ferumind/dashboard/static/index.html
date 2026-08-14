@@ -1,0 +1,615 @@
+<!doctype html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark light">
+    <title>Ferumind Operator Console</title>
+    <link rel="stylesheet" href="/static/basecoat/tokens.css">
+    <link rel="stylesheet" href="/static/basecoat/base.css">
+    <link rel="stylesheet" href="/static/basecoat/components.css">
+    <link rel="stylesheet" href="/static/dashboard.css">
+    <script src="/static/dashboard.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to dashboard content</a>
+
+    <header class="operator-header">
+      <div class="header-shell">
+        <div class="brand-block">
+          <div class="brand-mark" aria-hidden="true">F</div>
+          <div>
+            <h1 class="brand-title">
+              <span>Ferumind</span>
+              <span class="brand-subtitle">Operator Console</span>
+            </h1>
+            <p class="refresh-line">
+              <span id="connection-dot" class="bc-dot bc-tone-neutral" aria-hidden="true"></span>
+              <span id="connection-label">Waiting for local diagnostics</span>
+              <span aria-hidden="true">·</span>
+              <span>Updated <time id="last-refreshed">not yet</time></span>
+            </p>
+          </div>
+        </div>
+
+        <div class="operator-controls" aria-label="Dashboard controls">
+          <div class="field field--compact">
+            <label for="window-select">Time window</label>
+            <select id="window-select" name="window">
+              <option value="1h">Last hour</option>
+              <option value="24h" selected>Last 24 hours</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+          </div>
+          <button id="refresh-button" class="control-button" type="button">
+            <span aria-hidden="true">↻</span>
+            <span>Refresh</span>
+          </button>
+          <button
+            id="theme-toggle"
+            class="control-button"
+            type="button"
+            aria-pressed="false"
+          >
+            <span aria-hidden="true">◐</span>
+            <span id="theme-label">Light theme</span>
+          </button>
+        </div>
+
+        <form id="correlation-form" class="correlation-search" role="search">
+          <label for="correlation-input">Investigate a correlation ID</label>
+          <div class="search-row">
+            <input
+              id="correlation-input"
+              name="correlation_id"
+              type="search"
+              maxlength="256"
+              spellcheck="false"
+              autocomplete="off"
+              aria-describedby="correlation-message"
+              placeholder="fm_corr_… or historical ID"
+            >
+            <button class="primary-button" type="submit">Investigate</button>
+          </div>
+          <p id="correlation-message" class="field-message" role="status" aria-live="polite"></p>
+        </form>
+      </div>
+
+      <nav class="primary-nav" aria-label="Operator views">
+        <div class="nav-shell">
+          <a class="nav-link" href="#overview" data-route="overview" aria-current="page">Overview</a>
+          <a class="nav-link" href="#calls" data-route="calls">Calls</a>
+          <a class="nav-link" href="#errors" data-route="errors">Errors</a>
+          <a class="nav-link" href="#performance" data-route="performance">Performance</a>
+          <a class="nav-link" href="#runtime" data-route="runtime">Runtime</a>
+        </div>
+      </nav>
+    </header>
+
+    <div
+      id="global-notice"
+      class="bc-status-card bc-tone-caution global-notice"
+      role="status"
+      aria-live="polite"
+      hidden
+    >
+      <div class="bc-status-card__status">
+        <span class="bc-dot" aria-hidden="true"></span>
+        <span id="global-notice-title">Diagnostics are partially available</span>
+      </div>
+      <p id="global-notice-copy" class="bc-status-card__copy"></p>
+    </div>
+
+    <main id="main-content" class="dashboard-shell" tabindex="-1">
+      <section
+        id="view-overview"
+        class="dashboard-view"
+        data-view="overview"
+        aria-labelledby="overview-heading"
+      >
+        <div class="section-heading">
+          <div>
+            <p class="bc-eyebrow">Current posture</p>
+            <h2 id="overview-heading">Overview</h2>
+            <p>Recent activity and diagnostic signals, without pretending to be a health score.</p>
+          </div>
+          <p id="overview-state" class="view-state" role="status" aria-live="polite">
+            Loading overview…
+          </p>
+        </div>
+
+        <div class="status-grid" aria-label="Operator status summary">
+          <article id="database-card" class="bc-status-card bc-tone-neutral">
+            <p class="bc-eyebrow status-eyebrow">Database</p>
+            <div class="bc-status-card__status">
+              <span id="database-dot" class="bc-dot" aria-hidden="true"></span>
+              <span id="database-status">Checking availability</span>
+            </div>
+            <p id="database-copy" class="bc-status-card__copy">
+              Observation count and storage size are not available yet.
+            </p>
+          </article>
+
+          <article id="activity-card" class="bc-status-card bc-tone-neutral">
+            <p class="bc-eyebrow status-eyebrow">MCP activity</p>
+            <div class="bc-status-card__status">
+              <span id="activity-dot" class="bc-dot" aria-hidden="true"></span>
+              <span id="activity-status">Waiting for observations</span>
+            </div>
+            <p id="activity-copy" class="bc-status-card__copy">
+              No recent client or call information has loaded.
+            </p>
+          </article>
+
+          <article id="errors-card" class="bc-status-card bc-tone-neutral">
+            <p class="bc-eyebrow status-eyebrow">Errors</p>
+            <div class="bc-status-card__status">
+              <span id="errors-dot" class="bc-dot" aria-hidden="true"></span>
+              <span id="errors-status">Checking failures</span>
+            </div>
+            <p id="errors-copy" class="bc-status-card__copy">
+              Expected and internal failures are reported separately.
+            </p>
+          </article>
+
+          <article id="telemetry-card" class="bc-status-card bc-tone-neutral">
+            <p class="bc-eyebrow status-eyebrow">Telemetry &amp; runtime</p>
+            <div class="bc-status-card__status">
+              <span id="telemetry-dot" class="bc-dot" aria-hidden="true"></span>
+              <span id="telemetry-status">Lifecycle uncertain</span>
+            </div>
+            <p id="telemetry-copy" class="bc-status-card__copy">
+              Runtime events do not prove current process liveness.
+            </p>
+          </article>
+        </div>
+
+        <div class="bc-stat-row stat-grid" aria-label="Selected-window metrics">
+          <article class="bc-stat">
+            <span class="bc-eyebrow">Calls</span>
+            <strong id="overview-calls" class="bc-stat__value">—</strong>
+            <span class="stat-note">Selected period</span>
+          </article>
+          <article class="bc-stat">
+            <span class="bc-eyebrow">Failures</span>
+            <strong id="overview-failures" class="bc-stat__value">—</strong>
+            <span class="stat-note">Expected and internal</span>
+          </article>
+          <article class="bc-stat">
+            <span class="bc-eyebrow">Failure rate</span>
+            <strong id="overview-failure-rate" class="bc-stat__value">—</strong>
+            <span class="stat-note">Of observed calls</span>
+          </article>
+          <article class="bc-stat">
+            <span class="bc-eyebrow">P95 latency</span>
+            <strong id="overview-p95" class="bc-stat__value">—</strong>
+            <span id="overview-latency-samples" class="stat-note">No samples</span>
+          </article>
+          <article class="bc-stat">
+            <span class="bc-eyebrow">Largest response</span>
+            <strong id="overview-largest" class="bc-stat__value">—</strong>
+            <span id="overview-size-samples" class="stat-note">No samples</span>
+          </article>
+        </div>
+
+        <article class="bc-panel activity-panel">
+          <div class="panel-heading">
+            <div>
+              <p class="bc-eyebrow">Calls over time</p>
+              <h3>Activity</h3>
+            </div>
+            <div class="chart-legend" aria-label="Chart legend">
+              <span><span class="legend-swatch legend-swatch--calls" aria-hidden="true"></span>Calls, solid</span>
+              <span><span class="legend-swatch legend-swatch--failures" aria-hidden="true"></span>Failures, striped</span>
+            </div>
+          </div>
+          <figure class="activity-figure">
+            <div class="chart-frame">
+              <svg
+                id="activity-chart"
+                viewBox="0 0 800 180"
+                role="img"
+                aria-labelledby="activity-chart-title activity-chart-description"
+                preserveAspectRatio="none"
+              >
+                <title id="activity-chart-title">Calls and failures over the selected period</title>
+                <desc id="activity-chart-description">Activity data has not loaded.</desc>
+                <defs aria-hidden="true">
+                  <pattern
+                    id="failure-pattern"
+                    width="7"
+                    height="7"
+                    patternUnits="userSpaceOnUse"
+                  >
+                    <rect width="7" height="7" fill="var(--bc-tone-danger)"></rect>
+                    <path d="M-2 2 L2 -2 M0 7 L7 0 M5 9 L9 5" stroke="var(--bc-on-tone)" stroke-width="1.5"></path>
+                  </pattern>
+                </defs>
+                <g id="activity-grid" aria-hidden="true"></g>
+                <g id="activity-series" aria-hidden="true"></g>
+              </svg>
+            </div>
+            <figcaption>
+              <p id="activity-summary">Waiting for activity buckets.</p>
+              <p id="activity-range" class="muted-copy"></p>
+            </figcaption>
+          </figure>
+        </article>
+      </section>
+
+      <section
+        id="view-calls"
+        class="dashboard-view"
+        data-view="calls"
+        aria-labelledby="calls-heading"
+        hidden
+      >
+        <div class="section-heading">
+          <div>
+            <p class="bc-eyebrow">Bounded metadata</p>
+            <h2 id="calls-heading">Calls</h2>
+            <p>Filter recent MCP observations and open a safe correlation detail.</p>
+          </div>
+          <p id="calls-state" class="view-state" role="status" aria-live="polite">
+            Loading calls…
+          </p>
+        </div>
+
+        <form id="calls-filters" class="bc-panel filter-panel">
+          <div class="filter-grid">
+            <div class="field">
+              <label for="calls-project">Project</label>
+              <input id="calls-project" name="project" type="search" maxlength="256" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="calls-tool">Tool</label>
+              <input id="calls-tool" name="tool" type="search" maxlength="256" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="calls-client">Client</label>
+              <input id="calls-client" name="client" type="search" maxlength="256" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="calls-status">Status</label>
+              <select id="calls-status" name="status">
+                <option value="all">All statuses</option>
+                <option value="success">Succeeded</option>
+                <option value="failed">Failed</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="calls-error-code">Error code</label>
+              <input id="calls-error-code" name="error_code" type="search" maxlength="256" autocomplete="off">
+            </div>
+            <div class="field">
+              <label for="calls-window-select">Time window</label>
+              <select id="calls-window-select" name="window">
+                <option value="1h">Last hour</option>
+                <option value="24h" selected>Last 24 hours</option>
+                <option value="7d">Last 7 days</option>
+                <option value="30d">Last 30 days</option>
+              </select>
+            </div>
+          </div>
+          <div class="filter-actions">
+            <button class="primary-button" type="submit">Apply filters</button>
+            <button id="clear-calls-filters" class="control-button" type="button">Clear filters</button>
+          </div>
+        </form>
+
+        <article class="bc-panel table-panel" aria-labelledby="calls-table-heading">
+          <div class="panel-heading">
+            <div>
+              <p class="bc-eyebrow">Recent observations</p>
+              <h3 id="calls-table-heading">Call log</h3>
+            </div>
+            <p id="calls-result-summary" class="muted-copy">No results loaded</p>
+          </div>
+          <div class="table-scroll" tabindex="0" aria-label="Scrollable recent calls table">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Time</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Tool</th>
+                  <th scope="col">Project</th>
+                  <th scope="col">Client</th>
+                  <th scope="col">Duration</th>
+                  <th scope="col">Result size</th>
+                  <th scope="col">Error code</th>
+                </tr>
+              </thead>
+              <tbody id="calls-body">
+                <tr><td colspan="8">Loading recent calls…</td></tr>
+              </tbody>
+            </table>
+          </div>
+          <div class="pagination" aria-label="Call result pages">
+            <button id="calls-previous" class="control-button" type="button" disabled>Previous</button>
+            <span id="calls-page-label" aria-live="polite">Page not loaded</span>
+            <button id="calls-next" class="control-button" type="button" disabled>Next</button>
+          </div>
+        </article>
+
+        <article
+          id="observation-detail"
+          class="bc-panel detail-panel"
+          aria-labelledby="observation-detail-heading"
+          tabindex="-1"
+          hidden
+        >
+          <div class="panel-heading">
+            <div>
+              <p class="bc-eyebrow">Correlation investigation</p>
+              <h3 id="observation-detail-heading">Observation detail</h3>
+            </div>
+            <div class="detail-actions">
+              <button id="copy-correlation" class="control-button" type="button" disabled>
+                Copy correlation ID
+              </button>
+              <button id="close-detail" class="control-button" type="button">Close</button>
+            </div>
+          </div>
+          <p id="detail-status" class="view-state" role="status" aria-live="polite"></p>
+          <dl id="detail-fields" class="detail-grid"></dl>
+          <section aria-labelledby="runtime-diagnostic-heading">
+            <h4 id="runtime-diagnostic-heading">Runtime diagnostics</h4>
+            <div id="detail-runtime"></div>
+          </section>
+        </article>
+      </section>
+
+      <section
+        id="view-errors"
+        class="dashboard-view"
+        data-view="errors"
+        aria-labelledby="errors-heading"
+        hidden
+      >
+        <div class="section-heading">
+          <div>
+            <p class="bc-eyebrow">Failure investigation</p>
+            <h2 id="errors-heading">Errors</h2>
+            <p>Domain failures, application bugs, and observability failures remain distinct.</p>
+          </div>
+          <p id="errors-view-state" class="view-state" role="status" aria-live="polite">
+            Loading error groups…
+          </p>
+        </div>
+
+        <div class="error-sections">
+          <article class="bc-panel" aria-labelledby="expected-errors-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="bc-eyebrow">Expected &amp; domain failures</p>
+                <h3 id="expected-errors-heading">Error codes</h3>
+              </div>
+              <span id="expected-error-count" class="bc-chip bc-tone-caution">
+                Failures <span class="bc-chip__count">0</span>
+              </span>
+            </div>
+            <p class="panel-intro">These failures may be correct tool outcomes; they do not automatically imply an outage.</p>
+            <div id="expected-error-groups" class="group-list"></div>
+          </article>
+
+          <article class="bc-panel" aria-labelledby="internal-errors-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="bc-eyebrow">Application bugs</p>
+                <h3 id="internal-errors-heading">Internal error fingerprints</h3>
+              </div>
+              <span id="internal-error-count" class="bc-chip bc-tone-danger">
+                Groups <span class="bc-chip__count">0</span>
+              </span>
+            </div>
+            <p class="panel-intro">Repeated INTERNAL_ERROR events are grouped by their safe stack fingerprint.</p>
+            <div id="internal-error-groups" class="group-list"></div>
+          </article>
+
+          <article class="bc-panel" aria-labelledby="telemetry-errors-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="bc-eyebrow">Diagnostic blind spots</p>
+                <h3 id="telemetry-errors-heading">Observation persistence failures</h3>
+              </div>
+              <span id="telemetry-error-count" class="bc-chip bc-tone-danger">
+                Events <span class="bc-chip__count">0</span>
+              </span>
+            </div>
+            <p class="panel-intro">The original MCP work may have completed even when its observation could not be stored.</p>
+            <div id="telemetry-error-groups" class="group-list"></div>
+          </article>
+        </div>
+      </section>
+
+      <section
+        id="view-performance"
+        class="dashboard-view"
+        data-view="performance"
+        aria-labelledby="performance-heading"
+        hidden
+      >
+        <div class="section-heading">
+          <div>
+            <p class="bc-eyebrow">Diagnostic performance</p>
+            <h2 id="performance-heading">Performance</h2>
+            <p>Latency and response-size signals, with sample counts and no synthetic precision.</p>
+          </div>
+          <p id="performance-state" class="view-state" role="status" aria-live="polite">
+            Loading performance…
+          </p>
+        </div>
+
+        <div class="bc-stat-row stat-grid stat-grid--performance" aria-label="Performance summary">
+          <article class="bc-stat">
+            <span class="bc-eyebrow">Observed calls</span>
+            <strong id="performance-calls" class="bc-stat__value">—</strong>
+            <span class="stat-note">Selected period</span>
+          </article>
+          <article class="bc-stat">
+            <span class="bc-eyebrow">P50 latency</span>
+            <strong id="performance-p50" class="bc-stat__value">—</strong>
+            <span id="performance-latency-samples" class="stat-note">No samples</span>
+          </article>
+          <article class="bc-stat">
+            <span class="bc-eyebrow">P95 latency</span>
+            <strong id="performance-p95" class="bc-stat__value">—</strong>
+            <span class="stat-note">Observed distribution</span>
+          </article>
+          <article class="bc-stat">
+            <span class="bc-eyebrow">Maximum latency</span>
+            <strong id="performance-max" class="bc-stat__value">—</strong>
+            <span class="stat-note">Slowest measured call</span>
+          </article>
+          <article class="bc-stat">
+            <span class="bc-eyebrow">P95 response</span>
+            <strong id="performance-response-p95" class="bc-stat__value">—</strong>
+            <span id="performance-size-samples" class="stat-note">No samples</span>
+          </article>
+        </div>
+
+        <article class="bc-panel" aria-labelledby="tool-performance-heading">
+          <div class="panel-heading">
+            <div>
+              <p class="bc-eyebrow">Grouped by tool</p>
+              <h3 id="tool-performance-heading">Tool performance</h3>
+            </div>
+          </div>
+          <div class="table-scroll" tabindex="0" aria-label="Scrollable tool performance table">
+            <table>
+              <thead>
+                <tr>
+                  <th scope="col">Tool</th>
+                  <th scope="col">Calls</th>
+                  <th scope="col">Failures</th>
+                  <th scope="col">P50 latency</th>
+                  <th scope="col">P95 latency</th>
+                  <th scope="col">Maximum</th>
+                  <th scope="col">Relative P95</th>
+                </tr>
+              </thead>
+              <tbody id="tool-performance-body">
+                <tr><td colspan="7">Loading tool groups…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </article>
+
+        <div class="split-panels">
+          <article class="bc-panel" aria-labelledby="slowest-calls-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="bc-eyebrow">Latency outliers</p>
+                <h3 id="slowest-calls-heading">Slowest recent calls</h3>
+              </div>
+            </div>
+            <div class="table-scroll" tabindex="0" aria-label="Scrollable slowest calls table">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Tool</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Duration</th>
+                  </tr>
+                </thead>
+                <tbody id="slowest-calls-body">
+                  <tr><td colspan="4">Loading slow calls…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <article class="bc-panel" aria-labelledby="largest-responses-heading">
+            <div class="panel-heading">
+              <div>
+                <p class="bc-eyebrow">Response outliers</p>
+                <h3 id="largest-responses-heading">Largest recent responses</h3>
+              </div>
+            </div>
+            <div class="table-scroll" tabindex="0" aria-label="Scrollable largest responses table">
+              <table>
+                <thead>
+                  <tr>
+                    <th scope="col">Time</th>
+                    <th scope="col">Tool</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Result size</th>
+                  </tr>
+                </thead>
+                <tbody id="largest-responses-body">
+                  <tr><td colspan="4">Loading large responses…</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section
+        id="view-runtime"
+        class="dashboard-view"
+        data-view="runtime"
+        aria-labelledby="runtime-heading"
+        hidden
+      >
+        <div class="section-heading">
+          <div>
+            <p class="bc-eyebrow">Private event log</p>
+            <h2 id="runtime-heading">Runtime</h2>
+            <p>Lifecycle and exceptional events only; normal successful calls remain in SQLite.</p>
+          </div>
+          <p id="runtime-state" class="view-state" role="status" aria-live="polite">
+            Loading runtime events…
+          </p>
+        </div>
+
+        <article id="lifecycle-card" class="bc-status-card bc-tone-neutral lifecycle-card">
+          <p class="bc-eyebrow status-eyebrow">Latest inferred process state</p>
+          <div class="bc-status-card__status">
+            <span id="lifecycle-dot" class="bc-dot" aria-hidden="true"></span>
+            <span id="lifecycle-status">Unknown</span>
+          </div>
+          <p id="lifecycle-copy" class="bc-status-card__copy">
+            Event history has not loaded, so process liveness is not known.
+          </p>
+          <dl id="lifecycle-metadata" class="inline-metadata"></dl>
+        </article>
+
+        <article class="bc-panel timeline-panel" aria-labelledby="timeline-heading">
+          <div class="panel-heading">
+            <div>
+              <p class="bc-eyebrow">Newest first</p>
+              <h3 id="timeline-heading">Lifecycle timeline</h3>
+            </div>
+            <div class="chip-row">
+              <span id="runtime-log-chip" class="bc-chip bc-tone-neutral">
+                Log <span class="bc-chip__count">unknown</span>
+              </span>
+              <span id="runtime-malformed-chip" class="bc-chip bc-tone-neutral">
+                Malformed <span class="bc-chip__count">0</span>
+              </span>
+            </div>
+          </div>
+          <ol id="runtime-timeline" class="timeline">
+            <li class="timeline-empty">Loading safe runtime events…</li>
+          </ol>
+        </article>
+      </section>
+    </main>
+
+    <footer class="operator-footer">
+      <p>
+        Local, read-only metadata diagnostics. No request payloads, document bodies, or response
+        bodies are exposed.
+      </p>
+      <p id="dashboard-meta">API metadata not loaded.</p>
+    </footer>
+
+    <noscript>
+      <p class="noscript-message">This local dashboard needs JavaScript to query and render diagnostic metadata.</p>
+    </noscript>
+  </body>
+</html>

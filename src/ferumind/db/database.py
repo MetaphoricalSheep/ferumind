@@ -15,6 +15,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
+from urllib.parse import quote
 
 _MIGRATION_FILE_RE = re.compile(r"(\d{4})_[a-z0-9_]+\.sql")
 
@@ -65,9 +66,9 @@ def discover_migrations(migrations_dir: Path = MIGRATIONS_DIR) -> list[Migration
 class Database:
     """SQLite database manager: per-call connections, WAL, migrations.
 
-    Connections are opened per call (not long-lived) for stdio + watcher
-    concurrency; every connection sets ``busy_timeout`` because it is a
-    per-connection setting.
+    Connections are opened per call (not long-lived) for stdio concurrency;
+    every connection sets ``busy_timeout`` because it is a per-connection
+    setting.
     """
 
     def __init__(self, db_path: Path, *, migrations_dir: Path = MIGRATIONS_DIR) -> None:
@@ -89,6 +90,29 @@ class Database:
         conn.row_factory = sqlite3.Row
         return conn
 
+    def get_readonly_connection(self) -> sqlite3.Connection:
+        """Open the existing database without creating or mutating it.
+
+        SQLite's URI ``mode=ro`` is the filesystem-level guard: unlike
+        ``PRAGMA query_only``, it also prevents writes that happen before a
+        pragma can be installed and refuses to create a missing database.
+        ``query_only`` remains as defense in depth.  This opener deliberately
+        does not request WAL mode, initialize the schema, or run migrations.
+        """
+
+        encoded_path = quote(str(self._db_path.resolve(strict=False)), safe="/")
+        conn = sqlite3.connect(f"file:{encoded_path}?mode=ro", uri=True)
+        try:
+            conn.execute("PRAGMA query_only = ON")
+            conn.execute("PRAGMA busy_timeout = 5000")
+            conn.execute("PRAGMA foreign_keys = ON")
+            conn.execute("PRAGMA trusted_schema = OFF")
+            conn.row_factory = sqlite3.Row
+        except sqlite3.Error:
+            conn.close()
+            raise
+        return conn
+
     def init_schema(self) -> None:
         """Create or migrate the schema to the latest version."""
         self._db_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -97,10 +121,6 @@ class Database:
         latest = migrations[-1].number if migrations else 0
         conn = self.get_connection()
         try:
-            if not _is_fresh(conn) and _is_legacy_v1(conn):
-                conn.close()
-                self._sideline_legacy_db()
-                conn = self.get_connection()
             if _is_fresh(conn):
                 _apply_baseline_schema(conn, latest=latest)
                 return
@@ -119,46 +139,6 @@ class Database:
             conn.close()
             if self._db_path.exists():
                 self._db_path.chmod(0o600)
-
-    def close(self) -> None:
-        """Cleanup hook. Currently a no-op since connections are per-call."""
-
-    def _sideline_legacy_db(self) -> None:
-        """Move a pre-versioning v1 database aside so v2 starts from baseline.
-
-        The v1 database predates ``PRAGMA user_version`` tracking, so the
-        numbered-migration chain cannot bring it forward. The index tables are
-        derived state (rebuilt from Markdown on read); the file is preserved
-        next to the new one — never deleted — so v1 history stays inspectable.
-        """
-        backup = self._db_path.with_name(f"{self._db_path.stem}-v1-backup.sqlite")
-        counter = 1
-        while backup.exists():
-            counter += 1
-            backup = self._db_path.with_name(f"{self._db_path.stem}-v1-backup-{counter}.sqlite")
-        self._db_path.replace(backup)
-        backup.chmod(0o600)
-        for suffix in ("-wal", "-shm"):
-            sidecar = self._db_path.with_name(self._db_path.name + suffix)
-            if sidecar.exists():
-                backup_sidecar = backup.with_name(backup.name + suffix)
-                sidecar.replace(backup_sidecar)
-                backup_sidecar.chmod(0o600)
-
-
-def _is_legacy_v1(conn: sqlite3.Connection) -> bool:
-    """Detect a v1-era database: no version stamp plus v1-only tables.
-
-    A v2 baseline can also sit at ``user_version`` 0 while no numbered
-    migrations exist yet, so the check keys on schema shape: v1 created a
-    ``sessions`` table, which v2 never does (stateless per call, product D8).
-    """
-    if _user_version(conn) != 0:
-        return False
-    row = conn.execute(
-        "SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table' AND name = 'sessions'"
-    ).fetchone()
-    return int(row["n"]) > 0
 
 
 def _is_fresh(conn: sqlite3.Connection) -> bool:

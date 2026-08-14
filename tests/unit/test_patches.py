@@ -24,8 +24,11 @@ from ferumind.core.patches import (
     prepare_search_replace_patch,
     prepare_section_patch,
 )
+from tests.conftest import TEST_DESCRIPTION
 
-FM = generate_frontmatter(doc_id="doc_x", project_key="demo", title="Doc")
+FM = generate_frontmatter(
+    description=TEST_DESCRIPTION, doc_id="doc_x", project_key="demo", title="Doc"
+)
 BODY = "# Doc\n\n## Alpha\n\nalpha text\n\n## Beta\n\nbeta text\nbeta text\n"
 CONTENT = FM + BODY
 

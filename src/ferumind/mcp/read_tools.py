@@ -14,28 +14,42 @@ from mcp.types import CallToolResult
 from pydantic import BaseModel, Field
 
 from ferumind.core import search as search_core
-from ferumind.core.context import build_context
+from ferumind.core.context import ProjectContext, build_context
 from ferumind.core.document_map import (
+    DocumentMap,
+    DocumentRangeRead,
     build_document_map,
     read_document_range,
 )
-from ferumind.core.edit_targets import find_in_document
+from ferumind.core.edit_targets import FindInDocumentResult, find_in_document
 from ferumind.core.errors import FerumindError
 from ferumind.core.folders import ROLE_FOLDERS
 from ferumind.core.locks import acquire_project_lock
 from ferumind.core.operations import list_operations, list_pending_proposals
 from ferumind.core.paths import PathSafetyError, contained_project_root
 from ferumind.core.reads import (
+    ProjectSnapshotRead,
     list_project_tree,
     read_project_document,
     read_project_snapshot,
 )
 from ferumind.core.reconcile import reconcile_document, reconcile_project
 from ferumind.core.registry import list_entries
+from ferumind.core.skills import read_skill
 from ferumind.core.snapshots import list_snapshots_from_db
 from ferumind.core.types import JsonObject, JsonValue
-from ferumind.mcp.models import make_success, read_only_annotations
+from ferumind.mcp.models import FerumindResult, make_success, read_only_annotations
 from ferumind.mcp.protocols import ToolRegistrar
+from ferumind.mcp.result_models import (
+    DocumentData,
+    OperationLogData,
+    PendingPatchesData,
+    ProjectListingData,
+    SearchResultsData,
+    SkillData,
+    SnapshotListingData,
+    TreeListingData,
+)
 from ferumind.mcp.tool_context import (
     error_result,
     require_database,
@@ -43,8 +57,6 @@ from ferumind.mcp.tool_context import (
     require_workspace,
     scoped_project,
 )
-
-type FerumindToolResult = CallToolResult
 
 _PROJECT_FIELD = Field(description="Project key; validated against the registry, never an override")
 
@@ -62,15 +74,14 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         title="Get Context",
         description=(
             "The contract call — the first call of every chat. Returns the merged "
-            "workspace + project rules, the spine, the document map, and the inbox "
-            "count for the project, with payload-size telemetry."
+            "workspace + project rules, the spine, the document map, and the inbox count, "
+            "with payload-size telemetry."
         ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def get_context_tool(
         project: Annotated[str, _PROJECT_FIELD],
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProjectContext]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -90,17 +101,17 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         name="read_document",
         title="Read Document",
         description=(
-            "Read a Markdown document from the project (any folder, including "
-            "rules/, memory/, and archive/). Returns content, frontmatter, and "
-            "document_sha256 for hash-guarded edits."
+            "Read a Markdown document from the project (any folder, including rules/, "
+            "memory/, and archive/). Returns the document_sha256 that hash-guarded edits "
+            "need. Expensive fallback — prefer search_project → read_document_range when "
+            "you already know the lines, or get_document_map only when you need structure."
         ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def read_document_tool(
         project: Annotated[str, _PROJECT_FIELD],
         path: Annotated[str, Field(description="Project-relative Markdown path")],
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[DocumentData]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -124,6 +135,7 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
                     "status": document.parsed.status,
                     "edit_policy": document.parsed.edit_policy,
                     "title": document.parsed.title,
+                    "description": document.parsed.description,
                     "content": document.content,
                     "frontmatter": document.parsed.frontmatter,
                     "document_sha256": document.parsed.sha256,
@@ -137,11 +149,13 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         name="read_document_range",
         title="Read Document Range",
         description=(
-            "Read exact lines start_line..end_line of a document with a guarding "
-            "range hash for subsequent hash-guarded edits."
+            "Read exactly lines start_line..end_line of a document. The returned "
+            "range_sha256 guards a later positional edit. Prefer this after search_project "
+            "hands you a section's start_line/end_line — no get_document_map required. "
+            "Also the follow-up after find_in_document or a map when those already named "
+            "the lines. Cheaper than read_document."
         ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def read_document_range_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -151,7 +165,7 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         include_line_numbers: Annotated[
             bool, Field(description="Include a numbered rendering of the range")
         ] = True,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[DocumentRangeRead]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -184,18 +198,20 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         name="get_document_map",
         title="Get Document Map",
         description=(
-            "Structured map of a document: sections, blocks, and line ranges, each "
-            "with a content hash — the lookup step before a targeted patch."
+            "Structured map of a document without its body: sections, ranges, and hashes "
+            "for hash-guarded edits. Call it only when you need broader structure than a "
+            "search hit already gave you — it can be large on long documents. Prefer "
+            "search_project → read_document_range when the hit's start_line/end_line are "
+            "enough. Not required after every search."
         ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def get_document_map_tool(
         project: Annotated[str, _PROJECT_FIELD],
         path: Annotated[str, Field(description="Project-relative Markdown path")],
         include_blocks: Annotated[bool, Field(description="Include structural blocks")] = True,
         include_lines: Annotated[bool, Field(description="Include per-line hashes")] = False,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[DocumentMap]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -227,11 +243,10 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         name="find_in_document",
         title="Find In Document",
         description=(
-            "Find literal or regex matches inside a single document with context "
-            "lines and per-line hashes for anchoring edits."
+            "Find literal or regex matches inside one document. The pinpoint read: only "
+            "matched lines plus context, never the whole file."
         ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def find_in_document_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -246,7 +261,7 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
             bool, Field(description="Match inside fenced code blocks")
         ] = True,
         limit: Annotated[int, Field(description="Maximum matches returned", ge=1, le=100)] = 20,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[FindInDocumentResult]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -282,16 +297,30 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         name="search_project",
         title="Search Project",
         description=(
-            "Full-text search (FTS5, bm25-ranked) over this project's indexed "
-            "Project Markdown only — not external systems or other projects. Archived documents "
-            "are excluded unless include_archived is set."
+            "Full-text search (FTS5, bm25-ranked) over this project's indexed Markdown "
+            "sections. Query terms match with OR: a section hits if it contains any term; "
+            "bm25 ranks heading matches above the same term buried in prose, and "
+            "multi-term / rare-term hits above weak ones. Quoted phrases stay phrases. "
+            "Archived documents are excluded unless include_archived is set. Each hit is "
+            "one section with start_line/end_line — hand those straight to "
+            "read_document_range; skip get_document_map when the hit is enough; do not "
+            "read_document first. Several sections from one document may appear as "
+            "separate hits. limit counts sections, not documents."
         ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def search_project_tool(
         project: Annotated[str, _PROJECT_FIELD],
-        query: Annotated[str, Field(description="Search query", min_length=1)],
+        query: Annotated[
+            str,
+            Field(
+                description=(
+                    "Search query. Terms match with OR (any term may hit); "
+                    "bm25 ranks the result set. Use quotes for an exact phrase."
+                ),
+                min_length=1,
+            ),
+        ],
         folder: Annotated[
             str | None, Field(description=f"Restrict to a role folder ({', '.join(ROLE_FOLDERS)})")
         ] = None,
@@ -299,8 +328,15 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         include_archived: Annotated[
             bool, Field(description="Include archived documents in results")
         ] = False,
-        limit: Annotated[int, Field(description="Maximum results", ge=1, le=100)] = 20,
-    ) -> FerumindToolResult:
+        limit: Annotated[
+            int,
+            Field(
+                description="Maximum section hits to return (not documents)",
+                ge=1,
+                le=100,
+            ),
+        ] = 20,
+    ) -> Annotated[CallToolResult, FerumindResult[SearchResultsData]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -335,14 +371,16 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
     @mcp.tool(
         name="list_tree",
         title="List Tree",
-        description="List the project's Markdown files with folder, size, and status.",
+        description=(
+            "List the project's Markdown files. Paths and metadata only — no document "
+            "content. Not paginated."
+        ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def list_tree_tool(
         project: Annotated[str, _PROJECT_FIELD],
         folder: Annotated[str | None, Field(description="Restrict to one role folder")] = None,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[TreeListingData]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -364,17 +402,16 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         name="list_pending_patches",
         title="List Pending Patches",
         description=(
-            "List this project's pending patch proposals (id, path, age, "
-            "expires_at). Expired proposals are swept first."
+            "List this project's pending patch proposals (id, path, age, expires_at). "
+            "Expired proposals are swept first."
         ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def list_pending_patches_tool(
         project: Annotated[str, _PROJECT_FIELD],
         path: Annotated[str | None, Field(description="Filter by target path")] = None,
         limit: Annotated[int, Field(description="Maximum results", ge=1, le=100)] = 50,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[PendingPatchesData]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -412,15 +449,15 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
         description=(
             "Recent operations for this project (newest first), including "
             "out-of-band edits detected on disk (source: out-of-band)."
+            "Metadata only, never document content."
         ),
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def operation_log_tool(
         project: Annotated[str, _PROJECT_FIELD],
         path: Annotated[str | None, Field(description="Filter by target path")] = None,
         limit: Annotated[int, Field(description="Maximum results", ge=1, le=200)] = 50,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[OperationLogData]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -449,15 +486,14 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
     @mcp.tool(
         name="list_snapshots",
         title="List Snapshots",
-        description="List snapshots for this project (optionally for one path), newest first.",
+        description="List snapshots for this project (optionally for one path), newest first. Metadata only; use read_snapshot for content.",
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def list_snapshots_tool(
         project: Annotated[str, _PROJECT_FIELD],
         path: Annotated[str | None, Field(description="Filter by target path")] = None,
         limit: Annotated[int, Field(description="Maximum results", ge=1, le=200)] = 50,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[SnapshotListingData]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -486,14 +522,13 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
     @mcp.tool(
         name="read_snapshot",
         title="Read Snapshot",
-        description="Read a snapshot's metadata, before/after content, and diff.",
+        description="Read a snapshot's metadata, before/after content, and diff. Oversized content is flagged as omitted rather than truncated silently.",
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def read_snapshot_tool(
         project: Annotated[str, _PROJECT_FIELD],
         snapshot_id: Annotated[str, Field(description="Snapshot id from list_snapshots")],
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[ProjectSnapshotRead]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -506,13 +541,38 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
             return error_result(exc, project=project)
 
     @mcp.tool(
+        name="read_skill",
+        title="Read Skill",
+        description=(
+            "Fetch one Ferumind skill's full procedure text by name, when its trigger in "
+            "get_context.skills matches the situation. Workspace-level; no project argument."
+        ),
+        annotations=read_only_annotations(),
+    )
+    def read_skill_tool(
+        name: Annotated[str, Field(description="Skill name from get_context.skills")],
+    ) -> Annotated[CallToolResult, FerumindResult[SkillData]]:
+        try:
+            require_format_gate().check_read()
+            skill = read_skill(require_workspace(), name)
+            return make_success(
+                {
+                    "name": skill.name,
+                    "description": skill.description,
+                    "path": skill.path,
+                    "content_markdown": skill.content_markdown,
+                }
+            )
+        except (FerumindError, PathSafetyError) as exc:
+            return error_result(exc)
+
+    @mcp.tool(
         name="list_projects",
         title="List Projects",
-        description="List registered projects (key, title, status). Workspace-level; no project argument.",
+        description="List registered projects. Workspace-level; no project argument.",
         annotations=read_only_annotations(),
-        structured_output=False,
     )
-    def list_projects_tool() -> FerumindToolResult:
+    def list_projects_tool() -> Annotated[CallToolResult, FerumindResult[ProjectListingData]]:
         try:
             require_format_gate().check_read()
             entries = list_entries(require_workspace())

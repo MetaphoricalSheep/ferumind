@@ -18,7 +18,15 @@ class ToolDecorator(Protocol):
 
 
 class ToolRegistrar(Protocol):
-    """Minimal MCP registration surface used by this project."""
+    """Minimal MCP registration surface used by this project.
+
+    ``structured_output`` is optional and Ferumind never passes it. Schema
+    derivation is driven entirely by the return annotation
+    ``Annotated[CallToolResult, FerumindResult[...]]``; passing ``False`` here
+    would short-circuit ``func_metadata`` *before* that annotation is read and
+    silently strip every ``outputSchema`` from the surface. It stays in the
+    signature only because the SDK accepts it.
+    """
 
     def tool(
         self,
@@ -27,6 +35,6 @@ class ToolRegistrar(Protocol):
         title: str,
         description: str,
         annotations: ToolAnnotations,
-        structured_output: bool | None,
+        structured_output: bool | None = None,
         meta: dict[str, Any] | None = None,
     ) -> ToolDecorator: ...

@@ -132,8 +132,9 @@ just tunnel --init
 ```
 
 Creates a tunnel-client profile named `ferumind` (configurable via
-`FERUMIND_TUNNEL_PROFILE`). The profile will not be replaced if it already
-exists.
+`FERUMIND_TUNNEL_PROFILE`), then starts the tunnel. An existing profile is
+kept rather than replaced; use `--force` to replace it. To validate without
+starting anything, use `--doctor`.
 
 ### Replace an existing profile
 
@@ -175,10 +176,10 @@ matches, so `--stop` cannot kill an unrelated recycled PID.
 
 ## Overrides
 
-| Variable                  | Default                          |
-|---------------------------|----------------------------------|
-| `FERUMIND_TUNNEL_PROFILE`  | `ferumind`                        |
-| `TUNNEL_CLIENT_BIN`       | `tunnel-client`                  |
+| Variable                   | Default          |
+|----------------------------|------------------|
+| `FERUMIND_TUNNEL_PROFILE`  | `ferumind`       |
+| `TUNNEL_CLIENT_BIN`        | `tunnel-client`  |
 
 Examples:
 

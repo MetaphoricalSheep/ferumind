@@ -16,7 +16,7 @@ import base64
 from typing import Annotated
 
 from mcp.types import CallToolResult, ContentBlock, ImageContent, ResourceLink, TextContent
-from pydantic import AnyUrl, Field
+from pydantic import Field
 
 from ferumind.core.errors import FerumindError
 from ferumind.core.file_reads import (
@@ -44,8 +44,14 @@ from ferumind.core.renditions import (
     MIN_IMAGE_QUALITY,
 )
 from ferumind.core.types import JsonObject, JsonValue
-from ferumind.mcp.models import make_rich_success, make_success, read_only_annotations
+from ferumind.mcp.models import (
+    FerumindResult,
+    make_rich_success,
+    make_success,
+    read_only_annotations,
+)
 from ferumind.mcp.protocols import ToolRegistrar
+from ferumind.mcp.result_models import FileContextData, FileListingData
 from ferumind.mcp.tool_context import (
     error_result,
     require_format_gate,
@@ -53,53 +59,41 @@ from ferumind.mcp.tool_context import (
     scoped_project,
 )
 
-type FerumindToolResult = CallToolResult
-
 _PROJECT_FIELD = Field(description="Project key; validated against the registry, never an override")
 
 _LIST_FILES_DESCRIPTION = (
-    "Discover non-Markdown files anywhere inside a project — photographs, "
-    "PDFs, spreadsheets, exports — by walking the project on demand. "
-    "Workflow: read the project's rules, spine, and documents first, since "
-    "they carry the workspace's own conventions and often reference files "
-    "by path; call list_files when you do not already know the exact path; "
-    "then pass the path you chose to read_file. There is no prescribed "
-    "folder for files — a file may live in any valid nested location, and "
-    "library/ is only where uploads happen to land. Filenames, folders, and "
-    "extensions describe transport, never meaning: do not infer what a file "
-    "depicts from where it sits. query is a literal case-insensitive "
-    "substring match over path, filename, MIME type, extension, and any "
-    "scalar values in a Ferumind-generated upload sidecar — binary content "
-    "itself is NOT indexed or searched. Markdown is excluded by default "
-    "(use search_project/list_tree/read_document for managed documents), as "
-    "are Ferumind upload sidecars and internal .ferumind/ paths. Every result "
-    "carries a project-relative path and a ferumind:// resource_uri usable "
-    "with resources/read."
+    "Discover non-Markdown files in a project — photographs, PDFs, spreadsheets, "
+    "exports — by walking it on demand. Pass a returned path to read_file, or the "
+    "resource_uri to resources/read.\n"
+    "Read the project's rules, spine, and documents first: they carry the "
+    "workspace's conventions and often reference files by path. There is no "
+    "prescribed folder — a file may live anywhere, and library/ is only where "
+    "uploads land. Filenames, folders, and extensions describe transport, never "
+    "meaning; do not infer what a file depicts from where it sits.\n"
+    "query is a literal case-insensitive substring match over path, filename, MIME "
+    "type, extension, and scalar values in a Ferumind upload sidecar — binary "
+    "content is NOT indexed or searched. Markdown, sidecars, and .ferumind/ are "
+    "excluded by default; use search_project/list_tree/read_document for documents."
 )
 
 _READ_FILE_DESCRIPTION = (
-    "Read one project file into model context by its project-relative path, "
-    "and return a resource link to the untouched original. For JPEG, PNG, "
-    "and WebP the result carries a real image block holding a bounded "
-    "rendition the server generated (EXIF-oriented, aspect preserved, never "
-    "upscaled, metadata stripped). The edge and quality parameters are upper "
-    "bounds; every image still obeys a hard encoded-byte ceiling so retrying "
-    "with larger values cannot exceed a web host's tool-result limit. The "
-    "original bytes never travel inline. For UTF-8 "
-    "text the result carries a bounded slice with text_offset/max_text_chars "
-    "paging. Everything else — PDF, Office documents, archives, video, GIF, "
-    "SVG — is resource_only: you get metadata and the resource link, and you "
-    "have NOT seen the contents. Ferumind does not extract PDF text, render "
-    "PDF pages, parse Office documents, or run OCR. The returned "
-    "resource_uri always represents the exact original; whether a linked "
-    "resource is attached to the conversation is the client's decision, not "
-    "the server's. Managed Markdown is served as plain text here, but "
-    "read_document is the right tool for it — it returns frontmatter and the "
-    "document hash that hash-guarded edits need. "
-    "This tool is also the fallback when resources/read on the same path "
-    "fails with FILE_TOO_LARGE: originals are served whole and a large one "
-    "can exceed what the connection will carry, whereas the rendition and "
-    "text slice returned here are bounded by construction and always fit."
+    "Put one project file into model context by project-relative path, and return "
+    "a ResourceLink to the untouched original. The representation decides what you "
+    "get:\n"
+    "- JPEG/PNG/WebP -> a real image block holding a server-made rendition "
+    "(EXIF-oriented, aspect preserved, never upscaled, metadata stripped). "
+    "max_image_edge/image_quality are upper bounds; a hard byte ceiling always "
+    "wins, so retrying larger cannot exceed the host's result limit.\n"
+    "- UTF-8 text -> a bounded slice, paged with text_offset/max_text_chars.\n"
+    "- everything else (PDF, Office, archives, video, GIF, SVG) -> resource_only: "
+    "metadata and the link only. You have NOT seen the contents. Ferumind does no "
+    "PDF text extraction, PDF page rendering, Office parsing, or OCR.\n"
+    "Original bytes never travel inline. Whether the linked resource is attached "
+    "to the conversation is the client's decision. Markdown is served as plain "
+    "text here, but read_document is the right tool for it — it returns "
+    "frontmatter and the document_sha256 that guarded edits need. Also the "
+    "fallback when resources/read returns FILE_TOO_LARGE: that serves originals "
+    "whole, while the rendition and text slice here are bounded by construction."
 )
 
 
@@ -107,11 +101,11 @@ def _resource_link(result: FileContextResult) -> ResourceLink:
     """Build the standard MCP link to the untouched original."""
     return ResourceLink(
         type="resource_link",
-        uri=AnyUrl(result.file.resource_uri),
+        uri=result.file.resource_uri,
         name=result.file.path.rsplit("/", 1)[-1],
         title=result.file.path,
         description=f"Original {result.file.mime_type} file at {result.file.path}",
-        mimeType=result.file.mime_type,
+        mime_type=result.file.mime_type,
         size=result.file.size_bytes,
     )
 
@@ -185,7 +179,7 @@ def _image_blocks(result: FileContextResult) -> tuple[JsonObject, list[ContentBl
         ImageContent(
             type="image",
             data=base64.b64encode(rendition.data).decode("ascii"),
-            mimeType=rendition.mime_type,
+            mime_type=rendition.mime_type,
         ),
         _resource_link(result),
     ]
@@ -245,7 +239,6 @@ def register_file_tools(mcp: ToolRegistrar) -> None:
         title="List Files",
         description=_LIST_FILES_DESCRIPTION,
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def list_files_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -289,7 +282,7 @@ def register_file_tools(mcp: ToolRegistrar) -> None:
             str | None,
             Field(description="next_cursor from a previous call"),
         ] = None,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[FileListingData]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)
@@ -328,7 +321,6 @@ def register_file_tools(mcp: ToolRegistrar) -> None:
         title="Read File",
         description=_READ_FILE_DESCRIPTION,
         annotations=read_only_annotations(),
-        structured_output=False,
     )
     def read_file_tool(
         project: Annotated[str, _PROJECT_FIELD],
@@ -363,7 +355,7 @@ def register_file_tools(mcp: ToolRegistrar) -> None:
                 le=MAX_TEXT_CHARS_LIMIT,
             ),
         ] = DEFAULT_MAX_TEXT_CHARS,
-    ) -> FerumindToolResult:
+    ) -> Annotated[CallToolResult, FerumindResult[FileContextData]]:
         try:
             require_format_gate().check_read()
             entry = scoped_project(project)

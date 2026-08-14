@@ -1,6 +1,6 @@
-"""YAML frontmatter parsing, generation, and the v2 behavioral keys.
+"""YAML frontmatter parsing, generation, and the behavioral keys.
 
-Frontmatter v2 (product/spec-mcp.md §3): identity keys ``id``/``type``/
+Frontmatter (product/spec-mcp.md §3): identity keys ``id``/``type``/
 ``project``/``created`` plus the automatic ``updated`` are protected;
 behavior rides on ``status`` (active|gated|frozen|archived) and the optional
 ``edit_policy`` (free|append|propose-first|ask-human) with folder defaults.
@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import re
 import uuid
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final, cast
 
@@ -32,6 +33,25 @@ ALLOWED_STATUSES: Final[frozenset[str]] = frozenset({"active", "gated", "frozen"
 ALLOWED_EDIT_POLICIES: Final[frozenset[str]] = frozenset(
     {"free", "append", "propose-first", "ask-human"}
 )
+
+#: Upper bound on ``description``, enforced in validation rather than by
+#: convention. Every managed document's description ships in every
+#: ``get_context`` call, so an unbounded field is multiplied by the size of
+#: the project before anyone notices. 300 characters holds two real sentences
+#: and sits far inside :data:`MAX_FRONTMATTER_BYTES`.
+MAX_DESCRIPTION_CHARS: Final = 300
+
+
+@dataclass(frozen=True, slots=True)
+class FrontmatterBehavior:
+    """Optional behavioral metadata for a newly generated document."""
+
+    status: str = "active"
+    edit_policy: str | None = None
+
+
+_DEFAULT_FRONTMATTER_BEHAVIOR: Final = FrontmatterBehavior()
+
 
 _FRONTMATTER_RE = re.compile(r"^---\s*\n(.*?\n)---\s*\n?", re.DOTALL)
 _FRONTMATTER_OPEN_RE = re.compile(r"^---[ \t]*\r?\n")
@@ -86,6 +106,26 @@ def new_document_id() -> str:
     return f"doc_{uuid.uuid4().hex[:12]}"
 
 
+def new_episode_id() -> str:
+    """Return a durable identifier for one recorded episode.
+
+    This is **content identity**, not tool bookkeeping, and the distinction
+    matters because AGENTS.md forbids storing "operation ids or any tool
+    bookkeeping in Markdown documents". An operation id is short-lived server
+    state that means nothing to a future reader. An episode id is of the same
+    kind as the ``id: doc_…`` key every managed document already carries: it
+    is written into the document on purpose, it is meaningful to a human
+    reading the raw file, and it is the reference target of the follow-up
+    mechanism — the only way one episode can name an earlier one without
+    rewriting it. Removing it would remove the ability to record a follow-up.
+
+    Shaped after :func:`new_document_id` rather than ``new_proposal_id``:
+    proposal ids must be unguessable because possessing one authorizes an
+    apply, and nothing here is authorized by knowing an episode id.
+    """
+    return f"ep_{uuid.uuid4().hex[:12]}"
+
+
 def validate_status(status: str) -> str:
     if status not in ALLOWED_STATUSES:
         msg = f"Invalid status {status!r}: must be one of {sorted(ALLOWED_STATUSES)}"
@@ -100,28 +140,63 @@ def validate_edit_policy(edit_policy: str) -> str:
     return edit_policy
 
 
+def validate_description(description: object) -> str:
+    """Validate a ``description`` value, returning it stripped.
+
+    ``description`` answers one question — what is this document for? — and is
+    navigation metadata, never a type, an ontology, a table of contents, or a
+    directive. Absence is not tolerated on a managed document: a map where
+    some entries are described and some are not is worse than one where none
+    are, because the reader cannot tell absence of purpose from absence of
+    metadata.
+    """
+    if not isinstance(description, str):
+        raise FrontmatterInvalidError(
+            "Frontmatter description must be a string",
+            details={"found_type": type(description).__name__},
+        )
+    stripped = description.strip()
+    if not stripped:
+        raise FrontmatterInvalidError(
+            "Frontmatter description must not be empty or whitespace-only"
+        )
+    if len(stripped) > MAX_DESCRIPTION_CHARS:
+        raise FrontmatterInvalidError(
+            f"Frontmatter description is {len(stripped)} characters; "
+            f"maximum is {MAX_DESCRIPTION_CHARS}",
+            details={"max_chars": MAX_DESCRIPTION_CHARS},
+        )
+    return stripped
+
+
 def generate_frontmatter(
     *,
     doc_id: str,
     project_key: str,
     title: str,
-    status: str = "active",
-    edit_policy: str | None = None,
+    description: str,
+    behavior: FrontmatterBehavior = _DEFAULT_FRONTMATTER_BEHAVIOR,
 ) -> str:
-    """Generate the YAML frontmatter block for a new v2 document."""
-    validate_status(status)
-    if edit_policy is not None:
-        validate_edit_policy(edit_policy)
+    """Generate the YAML frontmatter block for a new document.
+
+    ``description`` is required rather than defaulted: every creation path has
+    to answer where its description comes from, and a default is how one of
+    them quietly answers "from the title".
+    """
+    validate_status(behavior.status)
+    if behavior.edit_policy is not None:
+        validate_edit_policy(behavior.edit_policy)
     now = datetime.now(UTC).isoformat()
     payload: dict[str, str] = {
         "id": doc_id,
         "type": DOCUMENT_TYPE,
         "project": project_key,
         "title": title,
-        "status": status,
+        "description": validate_description(description),
+        "status": behavior.status,
     }
-    if edit_policy is not None:
-        payload["edit_policy"] = edit_policy
+    if behavior.edit_policy is not None:
+        payload["edit_policy"] = behavior.edit_policy
     payload["created"] = now
     payload["updated"] = now
     dumped = yaml.safe_dump(payload, sort_keys=False, default_flow_style=False, allow_unicode=True)

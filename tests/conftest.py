@@ -1,9 +1,14 @@
 """Shared pytest fixtures for Ferumind tests.
 
-Every fixture builds on ``tmp_path``: a bootstrapped v2 workspace (contract
-files installed, ``format: 2`` marker), a schema-initialized database, and a
+Every fixture builds on ``tmp_path``: a bootstrapped workspace (contract
+files installed, current-format marker), a schema-initialized database, and a
 seeded project. MCP-level tests get a fully registered tool surface bound to
 that workspace via ``mcp_tools``.
+
+:func:`managed_markdown` builds valid managed frontmatter for tests that need
+a document on disk. Use it rather than hand-writing a frontmatter block: it
+is the single place that knows which keys are currently required, so the next
+format bump changes one function instead of every fixture in the suite.
 """
 
 from __future__ import annotations
@@ -30,7 +35,7 @@ from ferumind.db.database import Database  # noqa: E402
 
 @pytest.fixture
 def workspace(tmp_path: Path) -> WorkspaceRoot:
-    """A bootstrapped v2 workspace (skeleton + contract + format marker)."""
+    """A bootstrapped workspace (skeleton + contract + format marker)."""
     ws = tmp_path / "workspace"
     bootstrap(ws, force=False)
     return WorkspaceRoot(ws)
@@ -53,10 +58,44 @@ def conn(database: Database) -> Iterator[sqlite3.Connection]:
 @pytest.fixture
 def project(conn: sqlite3.Connection, workspace: WorkspaceRoot) -> str:
     """A created project ('demo') with seeded spine and rules."""
-    from ferumind.core.writes import create_project
+    from ferumind.core.project_writes import create_project
 
     create_project(conn, workspace, key="demo", title="Demo")
     return "demo"
+
+
+#: Default description for test fixtures. Real enough to pass validation
+#: without pretending to be the kind of sentence the contract asks for.
+TEST_DESCRIPTION = "Fixture document used by the Ferumind test suite."
+
+
+def managed_markdown(
+    body: str,
+    *,
+    project_key: str = "demo",
+    doc_id: str = "doc_test000000",
+    title: str = "Test Document",
+    description: str = TEST_DESCRIPTION,
+    extra_frontmatter: str = "",
+) -> str:
+    """Return managed Markdown with valid frontmatter and *body*.
+
+    Centralized so a change to the required-key set is one edit here rather
+    than a sweep through every test that happens to write a file.
+    """
+    lines = [
+        "---",
+        f"id: {doc_id}",
+        "type: document",
+        f"project: {project_key}",
+        f"title: {title}",
+        f"description: {description}",
+        "status: active",
+    ]
+    if extra_frontmatter:
+        lines.extend(extra_frontmatter.strip("\n").split("\n"))
+    lines.extend(["---", ""])
+    return "\n".join(lines) + body.lstrip("\n")
 
 
 def photograph_like(width: int, height: int, *, seed: int = 4242) -> Image.Image:

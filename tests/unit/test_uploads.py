@@ -12,8 +12,8 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
+from ferumind.core import upload_writes
 from ferumind.core import uploads as upload_staging
-from ferumind.core import writes
 from ferumind.core.errors import (
     ContentHashMismatchError,
     DocumentExistsError,
@@ -33,7 +33,7 @@ from ferumind.core.operations import get_operation, list_operations
 from ferumind.core.paths import WorkspaceRoot
 from ferumind.core.reads import read_project_snapshot
 from ferumind.core.snapshots import list_snapshots_from_db
-from ferumind.core.writes import (
+from ferumind.core.upload_writes import (
     append_upload_chunk,
     discard_upload,
     finalize_library_file_upload,
@@ -276,9 +276,9 @@ class TestUploadLibraryFile:
             raise sqlite3.OperationalError("synthetic durable bookkeeping failure")
 
         if failure_point == "snapshot_row":
-            monkeypatch.setattr(writes, "record_snapshot_in_db", fail)
+            monkeypatch.setattr(upload_writes, "record_snapshot_in_db", fail)
         else:
-            monkeypatch.setattr(writes, "record_operation", fail)
+            monkeypatch.setattr(upload_writes, "record_operation", fail)
 
         with pytest.raises(sqlite3.OperationalError, match="synthetic"):
             upload_library_file(
@@ -326,7 +326,7 @@ class TestUploadLibraryFile:
         # allocating/base64-encoding a real MAX_CHUNK_BYTES-sized payload
         # (upload_library_file is capped at MAX_CHUNK_BYTES since its whole
         # call has to fit in one tool call, same as a single chunk).
-        monkeypatch.setattr(writes, "MAX_CHUNK_BYTES", 16)
+        monkeypatch.setattr(upload_writes, "MAX_CHUNK_BYTES", 16)
         big = base64.b64encode(b"x" * 17).decode("ascii")
         with pytest.raises(FileTooLargeError):
             upload_library_file(conn, workspace, project, filename="big.bin", content_base64=big)
@@ -410,7 +410,7 @@ class TestUploadLibraryFile:
         project: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(writes, "MAX_UPLOAD_METADATA_BYTES", 8)
+        monkeypatch.setattr(upload_writes, "MAX_UPLOAD_METADATA_BYTES", 8)
         with pytest.raises(FileTooLargeError):
             upload_library_file(
                 conn,
@@ -476,12 +476,12 @@ class TestChunkedUpload:
         project: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(writes, "MAX_UPLOAD_CHUNKS", 3)
+        monkeypatch.setattr(upload_writes, "MAX_UPLOAD_CHUNKS", 3)
         with pytest.raises(ValidationError, match="maximum"):
             start_library_file_upload(
                 conn, workspace, project, filename="x.bin", total_size=1, total_chunks=4
             )
-        monkeypatch.setattr(writes, "MAX_CHUNK_BYTES", 4)
+        monkeypatch.setattr(upload_writes, "MAX_CHUNK_BYTES", 4)
         with pytest.raises(ValidationError, match="cannot fit"):
             start_library_file_upload(
                 conn, workspace, project, filename="x.bin", total_size=5, total_chunks=1
@@ -647,7 +647,7 @@ class TestChunkedUpload:
         def fail_terminal_state(*_args: object, **_kwargs: object) -> None:
             raise sqlite3.OperationalError("injected terminal-state failure")
 
-        monkeypatch.setattr(writes, "mark_operation_state", fail_terminal_state)
+        monkeypatch.setattr(upload_writes, "mark_operation_state", fail_terminal_state)
         with pytest.raises(sqlite3.OperationalError, match="terminal-state"):
             finalize_library_file_upload(
                 conn,
@@ -689,7 +689,7 @@ class TestChunkedUpload:
         project: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(writes, "MAX_CHUNK_BYTES", 4)
+        monkeypatch.setattr(upload_writes, "MAX_CHUNK_BYTES", 4)
         session = start_library_file_upload(
             conn, workspace, project, filename="x.pdf", total_size=4, total_chunks=1
         )
@@ -806,7 +806,7 @@ class TestChunkedUpload:
         project: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(writes, "MAX_UPLOAD_BYTES", 8)
+        monkeypatch.setattr(upload_writes, "MAX_UPLOAD_BYTES", 8)
         with pytest.raises(FileTooLargeError):
             start_library_file_upload(
                 conn, workspace, project, filename="x.pdf", total_size=9, total_chunks=1
@@ -841,7 +841,7 @@ class TestChunkedUpload:
         project: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(writes, "MAX_PENDING_UPLOAD_SESSIONS_PER_PROJECT", 1)
+        monkeypatch.setattr(upload_writes, "MAX_PENDING_UPLOAD_SESSIONS_PER_PROJECT", 1)
         start_library_file_upload(
             conn, workspace, project, filename="one.pdf", total_size=1, total_chunks=1
         )
@@ -857,7 +857,7 @@ class TestChunkedUpload:
         project: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        monkeypatch.setattr(writes, "MAX_PENDING_UPLOAD_BYTES_PER_PROJECT", 4)
+        monkeypatch.setattr(upload_writes, "MAX_PENDING_UPLOAD_BYTES_PER_PROJECT", 4)
         start_library_file_upload(
             conn, workspace, project, filename="one.pdf", total_size=4, total_chunks=1
         )
@@ -882,7 +882,7 @@ class TestChunkedUpload:
     def test_upload_scoped_to_its_project(
         self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
     ) -> None:
-        from ferumind.core.writes import create_project
+        from ferumind.core.project_writes import create_project
 
         create_project(conn, workspace, key="other", title="Other")
         session = start_library_file_upload(

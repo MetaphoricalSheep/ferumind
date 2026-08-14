@@ -2,152 +2,215 @@
 
 > Chats are disposable; Ferumind is where the continuity lives.
 
-Ferumind is a local-first, Markdown-backed workspace shared by a person and
-their AI agents. Documents remain inspectable on disk while a stateless MCP
-server provides project scoping, retrieval, guarded edits, snapshots, and an
-auditable operation history.
+[![CI](https://github.com/MetaphoricalSheep/ferumind/actions/workflows/ci.yml/badge.svg)](https://github.com/MetaphoricalSheep/ferumind/actions/workflows/ci.yml)
 
-This repository is Ferumind v2, currently **alpha**. The product contract is in
-[`product/`](product/00-what-is-ferumind.md); when code and
-[`product/spec-mcp.md`](product/spec-mcp.md) disagree, the specification wins.
+Ferumind is a Markdown workspace shared by you and your AI agents. It runs on
+your own machine, the documents stay readable and editable on disk, and a
+stateless MCP server handles project scoping, retrieval, guarded edits,
+snapshots, and an auditable history of every change.
 
-## Security status
+It is built to be used from a web chat client. An outbound relay dials from
+your machine to ChatGPT, so the workspace is reachable from the chat you are
+already in, with no inbound port and no public hostname. Local clients like
+Claude Code and Cursor connect over stdio.
 
-The supported deployment today is single-user and local, over MCP stdio.
-Direct SSE and streamable HTTP transports are disabled in code.
-
-**Do not expose Ferumind to the public internet yet.** Server-verified OAuth
-and subject-to-workspace authorization for ChatGPT and Claude are the next
-remote-serving gate. See [SECURITY.md](SECURITY.md) for the threat model,
-reporting process, and the complete internet deployment checklist.
-
-The public-tree release check is a necessary current-tree control, not approval
-to publish by itself: it classifies tracked paths but does not inspect file
-contents or Git history. Before making an existing repository public, review
-the complete history and current content for secrets and private data; revoke
-any exposed credential and either rewrite the affected history or publish from
-a reviewed clean export. Publishing or remotely serving a checkout that
-contains a live workspace is never supported. Live workspace content,
-databases, environment files, and generated agent configurations are ignored
-by Git; the public repository must contain code and synthetic fixtures only.
-
-## What it provides
-
-- A versioned Markdown workspace with one explicit registry and project
-  boundary.
-- Folder-derived document roles and policy metadata.
-- Lookup-first editing with guarded propose → apply semantics.
-- Snapshot-before-mutation, restore, archive, and out-of-band reconciliation.
-- SQLite FTS5 search, indexing, operation history, and metadata-only MCP call
-  observations.
-- Bounded binary uploads and SSRF-hardened ChatGPT file-reference ingestion.
-- A Typer CLI, mechanical filesystem watcher, and local stdio MCP server.
-
-The server is deliberately a librarian, not an autonomous knowledge agent:
-documents carry the behavior contract and connected chat agents exercise
-judgment.
-
-## Architecture
-
-```text
-Interface          MCP server · CLI
-                         │
-Core domain        paths · registry · documents · policy · search
-                   patches · writes · snapshots · operations · security
-                         │
-System state       Markdown workspace · SQLite index/history
-                         │
-Workers            index/watch · backup · maintenance (mechanical only)
-```
-
-Core safety logic lives in `src/ferumind/core`. Interface and worker layers
-call core rather than duplicating it.
+**Alpha**, distributed as a source checkout, on Python 3.12-3.14. The product
+contract is in [`product/`](product/00-what-is-ferumind.md); where code and
+[`product/spec-mcp.md`](product/spec-mcp.md) disagree, the spec wins.
 
 ## Quick start
 
-Requirements: Linux, Python 3.12+, [`uv`](https://docs.astral.sh/uv/), and
-[`just`](https://github.com/casey/just) for the convenience commands.
+Linux, Python 3.12-3.14, [`uv`](https://docs.astral.sh/uv/), and
+[`just`](https://github.com/casey/just). [`AGENTS.md`](AGENTS.md) lists the
+plain `uv` equivalent of every `just` recipe.
+
+### 1. Install
 
 ```bash
 git clone https://github.com/MetaphoricalSheep/ferumind.git
 cd ferumind
-just setup
-just install-hooks
-just bootstrap
-just verify
+just setup && just bootstrap && just verify
 ```
 
-Without `just`, the equivalent setup and verification commands are:
+The workspace defaults to `./workspace` inside the checkout. It is your data,
+so keep it somewhere else:
 
 ```bash
-uv sync --all-extras --dev
-scripts/install-hooks.sh
-uv run python scripts/bootstrap_workspace.py
-scripts/verify.sh
+cp .env.example .env
+echo 'FERUMIND_WORKSPACE=/home/you/ferumind-workspace' >> .env
+just bootstrap
 ```
 
-Useful commands:
+### 2. Create a project (optional)
 
-| Command | Purpose |
-|---|---|
-| `just cli -- --help` | Show the CLI |
-| `just bootstrap` | Initialize or repair the workspace skeleton |
-| `just project-list` | Compare registry, folder, and database project state |
-| `just verify` | Format, lint, type-check, and test with coverage |
-| `just sync-agents` | Regenerate ignored agent configurations |
+You can skip this. Once connected, ask your agent to make one and it will call
+`create_project`; the CLI and the tool run the same code. To do it yourself:
 
-`just project-delete <key>` is intentionally only stale-state cleanup. It
-refuses to remove a project folder containing user knowledge.
+```bash
+uv run ferumind project create notes --title "My Notes"
+```
+
+Either way you get a registry entry plus a folder skeleton with a seeded spine
+and rules.
+
+### 3. Connect ChatGPT
+
+The main way to use Ferumind. `tunnel-client` dials out from your machine over
+the [OpenAI Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels),
+so nothing listens for inbound connections. Full MCP support in ChatGPT is
+currently a [developer-mode feature](https://help.openai.com/en/articles/12584461-developer-mode-apps-and-full-mcp-connectors-in-chatgpt-beta).
+
+Put `CONTROL_PLANE_TUNNEL_ID` and `CONTROL_PLANE_API_KEY` in `.env`, then:
+
+```bash
+just tunnel --doctor    # validate, start nothing
+just tunnel --init      # create the profile if absent, then start
+just tunnel-bg          # run detached
+```
+
+[docs/tunnel.md](docs/tunnel.md) covers the variables, where secrets may live,
+and stopping a background tunnel. Read the [access model](#security) first: the
+relay credentials are the only thing guarding your workspace.
+
+Claude web is not supported. It needs a public URL, which the OpenAI tunnel
+does not provide, and standing one up is exactly what the gate below governs.
+
+### 4. Point your chat project at Ferumind
+
+One paste, once per project.
+[`product/contract/bootstrap.md`](product/contract/bootstrap.md) holds the
+prompt, and `just bootstrap` installs a copy to
+`workspace/system/prompts/bootstrap.md`.
+
+1. Create a project in ChatGPT.
+2. Copy the text below the `---` into its instructions.
+3. Replace `<PROJECT_KEY>` with your project key, for example `notes`.
+
+Every new chat in that project then calls `get_context` before answering, and
+reads the workspace rules, the spine, the document map, and the skills index
+instead of starting from nothing.
+
+### 5. Local clients (optional)
+
+Claude Code, Claude Desktop, and Cursor run the server over stdio. Configure it
+in the client, not in this repository:
+
+```json
+{
+  "mcpServers": {
+    "ferumind": {
+      "command": "/absolute/path/to/ferumind/scripts/ferumind-mcp-stdio"
+    }
+  }
+}
+```
+
+The path must be absolute, because clients spawn the server from their own
+working directory. Point at the wrapper rather than `uv run ferumind mcp
+serve`: it loads `.env` and strips control-plane credentials before starting.
+Keep `FERUMIND_WORKSPACE` in `.env` so one setting covers every client. The
+server appears as **Ferumind** with 48 tools.
+
+### 6. Inspect the local runtime
+
+Operator diagnostics stay on the machine that owns the workspace:
+
+```bash
+uv run ferumind doctor
+uv run ferumind lint
+uv run ferumind observations errors --since 24h
+uv run ferumind dashboard --open
+```
+
+The dashboard listens only on `127.0.0.1:8765`. It is a separate, read-only
+operator process rather than an MCP transport, and it continues to render a
+degraded diagnostic view when the MCP server is stopped. See
+[docs/observability.md](docs/observability.md) for correlation-ID lookup,
+privacy guarantees, SSH forwarding, and Basecoat theme maintenance.
+[`docs/lint.md`](docs/lint.md) documents the separate, report-only workspace
+lint command and what each check means.
+
+## Security
+
+Ferumind serves one person: the owner, running it themselves. Direct SSE and
+streamable HTTP transports are disabled in code.
+
+The optional operator dashboard is a distinct loopback-only HTTP surface. It
+has no mutation endpoints, is never attached to the MCP tunnel, rejects
+non-local Host headers, and loads no external assets. It does not make remote
+MCP serving supported.
+
+- The MCP server does not authenticate callers. The relay and its
+  `CONTROL_PLANE_*` credentials are the only access control in front of your
+  workspace. Treat them as granting full read and write access to everything
+  in it.
+- The relay provider sits in the data path. Your document and memory payloads
+  transit it.
+- Account scoping and `tunnel_id` are convenience, not server-verified
+  identity or workspace authorization.
+
+Serving anyone other than yourself needs OAuth, deny-by-default
+subject-to-workspace authorization, and the deployment review in
+[SECURITY.md](SECURITY.md), which also holds the threat model and the reporting
+process.
+
+`main` moves and is not a stable branch, the Python API is private, and there
+is no supported wheel, PyPI package, or container image. Pin an exact commit if
+you need repeatability.
+
+The public-tree release check is a necessary current-tree control, not approval
+to publish by itself: it classifies tracked paths but does not inspect file
+contents or Git history. Review both for secrets before making a repository
+public. Live workspace content, databases, environment files, and generated
+agent configurations are Git-ignored.
+
+## How it works
+
+```text
+Interface          MCP server · CLI · local operator dashboard
+Core domain        paths · registry · documents · policy · search
+                   patches · writes · snapshots · operations · diagnostics
+System state       Markdown workspace · SQLite index/history · private runtime events
+```
+
+Documents get their role from their folder. Editing is lookup-first and guarded
+by propose-then-apply, every mutation is snapshotted and logged, and search
+runs on SQLite FTS5. Call observations and exceptional runtime events record
+metadata only, never content. The CLI and local dashboard use one typed core
+diagnostic/query layer rather than embedding diagnostic SQL in either UI.
+Core safety logic lives in `src/ferumind/core`; the MCP and CLI layers call it
+rather than duplicating it.
+
+Edits made outside Ferumind are caught by reconcile-on-read. The next read that
+touches a path stats it against the index, reindexes on drift, marks pending
+proposals stale, and writes a log entry. There is no filesystem watcher.
+
+The server is a librarian rather than an autonomous agent. The documents carry
+the behavior contract; the connected chat agent exercises judgment.
 
 ## Workspace model
 
 ```text
 workspace/
-  system/                  global contract, templates, registry, format marker
-  projects/<key>/
-    spine.md
-    rules/
-    canvases/
-    memory/
-    library/
-    inbox/
-    archive/
-    .ferumind/              private snapshots and upload staging
+  system/            rules, skills, bootstrap prompt, templates, registry,
+                     format marker
+  projects/<key>/    spine.md, rules, canvases, memory, library, inbox, archive
   compacts/
-  .ferumind/                private database and global snapshots/backups
+  .ferumind/         private database, snapshots, backups
 ```
 
-Run the service as the same dedicated OS account that owns the workspace.
-Bootstrap creates the workspace root and contract files with private
-permissions. Never commit the contents of `workspace/`.
+Run it as the OS account that owns the workspace, and never commit
+`workspace/`.
 
 ## Development
 
 ```bash
-just format
-just lint
-just typecheck
-just test-cov
-just verify
+just verify    # format, lint, strict Pyright, tests, coverage floor
 ```
 
-The full gate checks the tracked public tree and immutable GitHub Action pins,
-then requires Ruff formatting and lint, strict Pyright, all pytest tests, and
-at least 80% global coverage. CI tests Python 3.12 and 3.13, audits the locked
-Python and OpenCode dependency environments, and builds, inspects, and
-smoke-tests the distributions.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) and the repository
-[`AGENTS.md`](AGENTS.md) before changing core behavior.
-
-## Tunnel tooling
-
-The repository includes outbound stdio relay scripts that expose the MCP
-server to a remote LLM frontend without an inbound port. The MCP server does
-not authenticate callers, so the relay and its credentials are the only access
-control in front of the workspace — supported for a workspace owner running it
-themselves, not as a production posture. Read [docs/tunnel.md](docs/tunnel.md)
-and [SECURITY.md](SECURITY.md) before working on that tooling.
+See [CONTRIBUTING.md](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md),
+[docs/python-support.md](docs/python-support.md), and
+[docs/mcp-sdk-support.md](docs/mcp-sdk-support.md).
 
 ## License
 

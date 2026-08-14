@@ -47,12 +47,23 @@ ALLOWLIST: list[dict[str, str]] = [
         ),
     },
     {
+        "file": "src/ferumind/mcp/observation.py",
+        "line": "if not isinstance(uri, str) or not uri.startswith(FILE_URI_PREFIX):",
+        "reason": (
+            "URI scheme dispatch on 'ferumind://file/' for telemetry only, NOT a"
+            " path containment check. Decides whether a resources/read URI is"
+            " one whose project key this middleware can label the observation"
+            " row with; a non-match records a null project. It never opens,"
+            " resolves, or authorizes anything. Safe."
+        ),
+    },
+    {
         "file": "src/ferumind/mcp/resources.py",
         "line": "if not uri_text.startswith(FILE_URI_PREFIX):",
         "reason": (
             "URI scheme dispatch on 'ferumind://file/', NOT a path containment"
             " check. Decides whether this handler owns the URI or delegates to"
-            " FastMCP. The encoded path inside is decoded by parse_file_uri and"
+            " the SDK. The encoded path inside is decoded by parse_file_uri and"
             " then resolved through contained_path, which is where containment"
             " is actually enforced. Safe."
         ),

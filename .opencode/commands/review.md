@@ -22,11 +22,6 @@
 5. Check tests cover the change adequately.
 6. Summarize risk level (low/medium/high) and any concerns.
 
-## Verification
-
-- [ ] No TODOs/FIXMEs/HACKs without documented issue
-- [ ] No `Any` without justification
-- [ ] No `# type: ignore` without justification
-- [ ] No boundary violations
-- [ ] No security concerns
-- [ ] Adequate test coverage for the change
+A red flag is not automatically a defect — `Any` and `# type: ignore` are
+allowed with a written justification, and a `TODO` is allowed against a real
+issue. What the review reports is the ones lacking that.

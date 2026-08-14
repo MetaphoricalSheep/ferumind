@@ -10,13 +10,17 @@ from pathlib import Path
 
 import pytest
 
-from ferumind.core import writes as writes_module
-from ferumind.core.documents import compute_sha256
+from ferumind.core import lifecycle_writes as lifecycle_writes_module
+from ferumind.core import patch_writes as patch_writes_module
+from ferumind.core import project_writes as project_writes_module
+from ferumind.core.document_writes import CAPTURE_NOTE_DESCRIPTION, capture_note, create_document
+from ferumind.core.documents import compute_sha256, parse_document_content
 from ferumind.core.errors import (
     CannotArchiveSpineError,
     DocumentArchivedError,
     DocumentExistsError,
     DocumentNotFoundError,
+    FrontmatterInvalidError,
     FrontmatterProtectedError,
     InvalidOperationError,
     OperationNotFoundError,
@@ -30,10 +34,23 @@ from ferumind.core.errors import (
     ValidationError,
     WorkspaceMismatchError,
 )
-from ferumind.core.frontmatter import parse_frontmatter
+from ferumind.core.frontmatter import MAX_DESCRIPTION_CHARS, parse_frontmatter
+from ferumind.core.lifecycle_writes import (
+    archive_document,
+    restore_snapshot,
+    unarchive_document,
+)
 from ferumind.core.locks import acquire_project_lock
 from ferumind.core.operations import get_operation
+from ferumind.core.patch_writes import (
+    apply_patch,
+    discard_patch,
+    propose_exact_replace_patch,
+    propose_frontmatter_patch,
+    propose_patch,
+)
 from ferumind.core.paths import WorkspaceRoot
+from ferumind.core.project_writes import create_project
 from ferumind.core.registry import ProjectEntry, load_registry, require_project, save_registry
 from ferumind.core.snapshots import (
     create_snapshot,
@@ -42,20 +59,9 @@ from ferumind.core.snapshots import (
     read_snapshot_before_content,
     record_snapshot_in_db,
 )
-from ferumind.core.writes import (
-    apply_patch,
-    archive_document,
-    capture_note,
-    create_document,
-    create_project,
-    discard_patch,
-    propose_exact_replace_patch,
-    propose_frontmatter_patch,
-    propose_patch,
-    restore_snapshot,
-    unarchive_document,
-)
+from ferumind.core.write_limits import MAX_TITLE_CHARS
 from ferumind.db.database import Database
+from tests.conftest import TEST_DESCRIPTION
 
 
 @pytest.fixture
@@ -67,6 +73,7 @@ def doc(conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str) -> str
         folder_path="canvases",
         title="Plan",
         content="# Plan\n\nalpha beta gamma\n",
+        description=TEST_DESCRIPTION,
     )
     return result.path
 
@@ -142,7 +149,9 @@ class TestProposeApply:
         def fail(*_args: object, **_kwargs: object) -> str:
             raise sqlite3.OperationalError("synthetic apply bookkeeping failure")
 
-        monkeypatch.setattr(writes_module, "record_operation", fail)
+        # patch_writes, not writes: apply_patch's bookkeeping now runs there,
+        # and writes still re-reads its own record_operation for other domains.
+        monkeypatch.setattr(patch_writes_module, "record_operation", fail)
         with pytest.raises(sqlite3.OperationalError, match="synthetic"):
             apply_patch(conn, workspace, project, proposal.operation_id)
 
@@ -426,6 +435,29 @@ class TestProposeApply:
         apply_patch(conn, workspace, project, proposal.operation_id)
         assert "edit_policy: append" in _read(workspace, project, doc)
 
+    def test_frontmatter_patch_changes_description_through_guarded_apply(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str, doc: str
+    ) -> None:
+        before = _read(workspace, project, doc)
+        before_fm = parse_frontmatter(before)
+        replacement = "Navigation sentence updated after the document purpose changed."
+        proposal = propose_frontmatter_patch(
+            conn,
+            workspace,
+            project,
+            path=doc,
+            set_values={"description": replacement},
+            remove_keys=[],
+            expected_document_sha256=compute_sha256(before),
+        )
+
+        applied = apply_patch(conn, workspace, project, proposal.operation_id)
+        after = _read(workspace, project, doc)
+        after_fm = parse_frontmatter(after)
+        assert after_fm["description"] == replacement
+        assert after_fm["updated"] != before_fm["updated"]
+        assert applied.document_sha256 == compute_sha256(after)
+
     def test_propose_patch_body_mode_preserves_frontmatter(
         self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str, doc: str
     ) -> None:
@@ -536,9 +568,13 @@ class TestDirectWrites:
             folder_path="library/runbooks",
             title="Rebuild Guide",
             content="steps\n",
+            description=TEST_DESCRIPTION,
         )
         assert result.path == "library/runbooks/rebuild-guide.md"
         assert result.folder == "library"
+        assert parse_frontmatter(_read(workspace, project, result.path))["description"] == (
+            TEST_DESCRIPTION
+        )
         with pytest.raises(DocumentExistsError):
             create_document(
                 conn,
@@ -547,6 +583,7 @@ class TestDirectWrites:
                 folder_path="library/runbooks",
                 title="Rebuild Guide",
                 content="again\n",
+                description=TEST_DESCRIPTION,
             )
 
     def test_create_document_rejects_unknown_and_archive_folders(
@@ -555,11 +592,23 @@ class TestDirectWrites:
         for folder_path in ("docs", "archive", ""):
             with pytest.raises(UnknownFolderError):
                 create_document(
-                    conn, workspace, project, folder_path=folder_path, title="X", content="x"
+                    conn,
+                    workspace,
+                    project,
+                    folder_path=folder_path,
+                    title="X",
+                    content="x",
+                    description=TEST_DESCRIPTION,
                 )
         with pytest.raises(ValidationError):
             create_document(
-                conn, workspace, project, folder_path="canvases", title="  ", content="x"
+                conn,
+                workspace,
+                project,
+                folder_path="canvases",
+                title="  ",
+                content="x",
+                description=TEST_DESCRIPTION,
             )
 
     @pytest.mark.parametrize(
@@ -583,7 +632,13 @@ class TestDirectWrites:
     ) -> None:
         with pytest.raises(ValidationError):
             create_document(
-                conn, workspace, project, folder_path=folder_path, title="X", content="x"
+                conn,
+                workspace,
+                project,
+                folder_path=folder_path,
+                title="X",
+                content="x",
+                description=TEST_DESCRIPTION,
             )
 
     def test_create_document_rejects_control_characters_in_title(
@@ -597,6 +652,7 @@ class TestDirectWrites:
                 folder_path="canvases",
                 title="bad\ntitle",
                 content="x",
+                description=TEST_DESCRIPTION,
             )
 
     def test_capture_note_lands_in_inbox(
@@ -604,7 +660,9 @@ class TestDirectWrites:
     ) -> None:
         result = capture_note(conn, workspace, project, text="remember the tunnel cert")
         assert result.path.startswith("inbox/")
-        assert "remember the tunnel cert" in _read(workspace, project, result.path)
+        content = _read(workspace, project, result.path)
+        assert "remember the tunnel cert" in content
+        assert parse_frontmatter(content)["description"] == CAPTURE_NOTE_DESCRIPTION
         with pytest.raises(ValidationError):
             capture_note(conn, workspace, project, text="   ")
 
@@ -621,6 +679,7 @@ class TestArchiveLifecycle:
         archived_content = _read(workspace, project, archived.archived_path)
         assert "status: archived" in archived_content
         assert original_id in archived_content
+        assert parse_frontmatter(archived_content)["description"] == TEST_DESCRIPTION
 
         restored = unarchive_document(
             conn, workspace, project, archived_path=archived.archived_path
@@ -629,6 +688,7 @@ class TestArchiveLifecycle:
         restored_content = _read(workspace, project, doc)
         assert "status: active" in restored_content
         assert original_id in restored_content
+        assert parse_frontmatter(restored_content)["description"] == TEST_DESCRIPTION
         assert "alpha beta gamma" in restored_content
 
     def test_spine_cannot_be_archived(
@@ -650,7 +710,9 @@ class TestArchiveLifecycle:
         def fail(*_args: object, **_kwargs: object) -> str:
             raise sqlite3.OperationalError("synthetic archive bookkeeping failure")
 
-        monkeypatch.setattr(writes_module, "record_operation", fail)
+        # `archive_document` now runs in `lifecycle_writes`; patching `writes`
+        # would still succeed and do nothing (REL-025's silent seam class).
+        monkeypatch.setattr(lifecycle_writes_module, "record_operation", fail)
         with pytest.raises(sqlite3.OperationalError, match="synthetic"):
             archive_document(conn, workspace, project, path=doc)
 
@@ -671,7 +733,8 @@ class TestArchiveLifecycle:
         def fail(*_args: object, **_kwargs: object) -> str:
             raise sqlite3.OperationalError("synthetic unarchive bookkeeping failure")
 
-        monkeypatch.setattr(writes_module, "record_operation", fail)
+        # `unarchive_document` now runs in `lifecycle_writes`.
+        monkeypatch.setattr(lifecycle_writes_module, "record_operation", fail)
         with pytest.raises(sqlite3.OperationalError, match="synthetic"):
             unarchive_document(
                 conn,
@@ -691,12 +754,18 @@ class TestArchiveLifecycle:
         doc: str,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        calls: list[str] = []
+
         def fail_index_removal(*_args: object, **_kwargs: object) -> None:
+            calls.append("remove_from_index")
             raise sqlite3.OperationalError("injected index removal failure")
 
-        monkeypatch.setattr(writes_module, "remove_from_index", fail_index_removal)
+        monkeypatch.setattr(lifecycle_writes_module, "remove_from_index", fail_index_removal)
         result = archive_document(conn, workspace, project, path=doc)
 
+        # Without this the test still passes when the patch stops biting, and
+        # would be asserting the happy path instead of the tolerated failure.
+        assert calls == ["remove_from_index"], "the injected index failure never fired"
         assert result.index_error == "Index removal failed (OperationalError)"
         assert not (workspace / "projects" / project / doc).exists()
         assert (workspace / "projects" / project / result.archived_path).is_file()
@@ -713,7 +782,13 @@ class TestArchiveLifecycle:
     ) -> None:
         archived = archive_document(conn, workspace, project, path=doc)
         create_document(
-            conn, workspace, project, folder_path="canvases", title="Plan", content="new one\n"
+            conn,
+            workspace,
+            project,
+            folder_path="canvases",
+            title="Plan",
+            content="new one\n",
+            description=TEST_DESCRIPTION,
         )
         with pytest.raises(PathExistsError):
             unarchive_document(conn, workspace, project, archived_path=archived.archived_path)
@@ -773,6 +848,44 @@ class TestRestore:
 
         with pytest.raises(SnapshotNotFoundError, match="integrity"):
             restore_snapshot(conn, workspace, project, applied.snapshot_id)
+
+        assert _read(workspace, project, doc) == current
+        assert conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0] == before_snapshot_rows
+
+    def test_restore_rejects_legacy_snapshot_missing_current_description(
+        self,
+        conn: sqlite3.Connection,
+        workspace: WorkspaceRoot,
+        project: str,
+        doc: str,
+    ) -> None:
+        current = _read(workspace, project, doc)
+        legacy_content = (
+            "\n".join(line for line in current.splitlines() if not line.startswith("description:"))
+            + "\n"
+        )
+        snapshot_id = new_snapshot_id()
+        snapshot_dir = create_snapshot(
+            workspace / "projects" / project,
+            project_key=project,
+            target_path=doc,
+            before_content=legacy_content,
+            after_content=None,
+            reason="test_legacy_restore",
+            snapshot_id=snapshot_id,
+        )
+        record_snapshot_in_db(
+            conn,
+            snapshot_id=snapshot_id,
+            project_key=project,
+            target_path=doc,
+            snapshot_dir=str(snapshot_dir),
+            reason="test_legacy_restore",
+        )
+        before_snapshot_rows = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
+
+        with pytest.raises(FrontmatterInvalidError, match="description"):
+            restore_snapshot(conn, workspace, project, snapshot_id)
 
         assert _read(workspace, project, doc) == current
         assert conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0] == before_snapshot_rows
@@ -842,6 +955,68 @@ class TestCreateProject:
         assert "id: doc_" in spine
         rules = (project_dir / "rules/00-project.md").read_text(encoding="utf-8")
         assert "edit_policy: ask-human" in rules
+        assert parse_document_content(
+            spine, project_key="garden", path="spine.md"
+        ).description.startswith("Entry page for Garden")
+        assert parse_document_content(
+            rules, project_key="garden", path="rules/00-project.md"
+        ).description.startswith("Human-owned rules specific to Garden")
+
+    def test_create_project_refuses_a_missing_template_without_fallback(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot
+    ) -> None:
+        (workspace / "system/templates/spine.md").unlink()
+
+        with pytest.raises(FrontmatterInvalidError, match="Required project template"):
+            create_project(conn, workspace, key="missing-template", title="Missing Template")
+
+        assert "missing-template" not in load_registry(workspace)
+        assert not (workspace / "projects/missing-template").exists()
+
+    @pytest.mark.parametrize(
+        "replacement",
+        [None, 'description: ""\n', "description: []\n", f"description: {'x' * 301}\n"],
+        ids=["missing", "empty", "non-string", "too-long"],
+    )
+    def test_create_project_refuses_invalid_template_descriptions_without_fallback(
+        self,
+        conn: sqlite3.Connection,
+        workspace: WorkspaceRoot,
+        replacement: str | None,
+    ) -> None:
+        template = workspace / "system/templates/spine.md"
+        lines = template.read_text(encoding="utf-8").splitlines(keepends=True)
+        description_line = next(line for line in lines if line.startswith("description:"))
+        rewritten = "".join(
+            replacement if line == description_line and replacement is not None else line
+            for line in lines
+            if line != description_line or replacement is not None
+        )
+        template.write_text(rewritten, encoding="utf-8")
+
+        with pytest.raises(FrontmatterInvalidError):
+            create_project(conn, workspace, key="bad-template", title="Bad Template")
+
+        assert "bad-template" not in load_registry(workspace)
+        assert not (workspace / "projects/bad-template").exists()
+
+    def test_create_project_keeps_a_valid_long_title_with_bounded_descriptions(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot
+    ) -> None:
+        title = "L" * MAX_TITLE_CHARS
+
+        create_project(conn, workspace, key="long-title", title=title)
+
+        project_dir = workspace / "projects/long-title"
+        for path in ("spine.md", "rules/00-project.md"):
+            parsed = parse_document_content(
+                (project_dir / path).read_text(encoding="utf-8"),
+                project_key="long-title",
+                path=path,
+            )
+            assert parsed.title == title
+            assert "this project" in parsed.description
+            assert len(parsed.description) <= MAX_DESCRIPTION_CHARS
 
     def test_create_project_refuses_duplicates_and_bad_keys(
         self, conn: sqlite3.Connection, workspace: WorkspaceRoot
@@ -865,7 +1040,7 @@ class TestCreateProject:
         def fail(*_args: object, **_kwargs: object) -> str:
             raise sqlite3.OperationalError("synthetic project bookkeeping failure")
 
-        monkeypatch.setattr(writes_module, "record_operation", fail)
+        monkeypatch.setattr(project_writes_module, "record_operation", fail)
         with pytest.raises(sqlite3.OperationalError, match="synthetic"):
             create_project(conn, workspace, key="rollback", title="Rollback")
 
@@ -898,7 +1073,7 @@ class TestCreateProject:
             save_registry(workspace_arg, registry_arg)
 
         monkeypatch.setattr(
-            "ferumind.core.writes.save_registry",
+            "ferumind.core.project_writes.save_registry",
             pause_before_publication,
         )
 
@@ -955,7 +1130,7 @@ class TestCreateProject:
         ) -> None:
             raise OSError("synthetic pre-replace registry failure")
 
-        monkeypatch.setattr("ferumind.core.writes.save_registry", fail_before_replace)
+        monkeypatch.setattr("ferumind.core.project_writes.save_registry", fail_before_replace)
         with pytest.raises(OSError, match="pre-replace"):
             create_project(conn, workspace, key="unpublished", title="Unpublished")
 
@@ -972,16 +1147,22 @@ class TestCreateProject:
         workspace: WorkspaceRoot,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
+        calls: list[str] = []
+
         def save_then_fail(
             workspace_arg: WorkspaceRoot,
             registry_arg: dict[str, ProjectEntry],
         ) -> None:
+            calls.append("save_registry")
             save_registry(workspace_arg, registry_arg)
             raise OSError("synthetic post-replace fsync failure")
 
-        monkeypatch.setattr("ferumind.core.writes.save_registry", save_then_fail)
+        monkeypatch.setattr("ferumind.core.project_writes.save_registry", save_then_fail)
         result = create_project(conn, workspace, key="durable", title="Durable")
 
+        # Every assertion below also holds when save_registry never fails, so
+        # without this the test is vacuous the moment the patch stops biting.
+        assert calls == ["save_registry"], "the injected fsync failure never fired"
         assert result.key == "durable"
         assert "durable" in load_registry(workspace)
         assert (workspace / "projects/durable/spine.md").is_file()

@@ -1,20 +1,31 @@
-"""Content indexing: Markdown files → the ``documents`` table + FTS5 mirror.
+"""Content indexing: Markdown files → the ``documents`` table + FTS5 mirrors.
 
 The index is derived state, rebuildable from Markdown at any time. Rows are
 keyed by ``(project_key, path)`` so re-indexing replaces instead of
-accumulating. Each row stores ``mtime_ns``/``size_bytes`` so reads can
-detect out-of-band drift with a stat call (reconcile-on-read, 00 D12).
+accumulating. Each document row stores ``mtime_ns``/``size_bytes`` so reads
+can detect out-of-band drift with a stat call (reconcile-on-read, 00 D12).
+
+Section rows come from :func:`ferumind.core.document_map.derive_sections` —
+the same parser ``get_document_map`` and the patch resolver use — so an
+indexed line range is the range an edit resolves against.
 """
 
 from __future__ import annotations
 
 import json
 from contextlib import ExitStack
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from ferumind.core.document_map import (
+    DocumentSection,
+    derive_sections,
+    frontmatter_line_range,
+    split_document_lines,
+)
 from ferumind.core.documents import ParsedDocument, parse_document
 from ferumind.core.locks import acquire_project_lock
 from ferumind.core.paths import contained_path, contained_project_root
@@ -28,6 +39,13 @@ class IndexResult(BaseModel):
     documents_removed: int = 0
     errors: int = 0
     error_messages: list[str] = Field(default_factory=list)
+
+
+@dataclass(frozen=True, slots=True)
+class _SectionRow:
+    section: DocumentSection
+    body: str
+    size_bytes: int
 
 
 def _now_iso() -> str:
@@ -70,14 +88,7 @@ def index_file(
 
 def remove_from_index(conn: DbConnection, project_key: str, path: str) -> None:
     """Remove a document (e.g. moved or deleted on disk) from the index."""
-    conn.execute(
-        "DELETE FROM documents WHERE project_key = ? AND path = ?",
-        (project_key, path),
-    )
-    conn.execute(
-        "DELETE FROM search_index WHERE project_key = ? AND path = ?",
-        (project_key, path),
-    )
+    _delete_index_rows(conn, project_key, path)
     conn.commit()
 
 
@@ -120,14 +131,7 @@ def index_project(
     ).fetchall()
     for row in rows:
         if row["path"] not in seen_paths:
-            conn.execute(
-                "DELETE FROM documents WHERE project_key = ? AND path = ?",
-                (project_key, row["path"]),
-            )
-            conn.execute(
-                "DELETE FROM search_index WHERE project_key = ? AND path = ?",
-                (project_key, row["path"]),
-            )
+            _delete_index_rows(conn, project_key, row["path"])
             result.documents_removed += 1
 
     conn.commit()
@@ -157,8 +161,7 @@ def rebuild_index(
 
     total = IndexResult()
     for key in project_keys:
-        conn.execute("DELETE FROM documents WHERE project_key = ?", (key,))
-        conn.execute("DELETE FROM search_index WHERE project_key = ?", (key,))
+        _delete_project_index_rows(conn, key)
         conn.commit()
         sub = index_project(conn, workspace_root, key)
         total.documents_indexed += sub.documents_indexed
@@ -181,6 +184,38 @@ def get_indexed_signature(
     return int(row["mtime_ns"]), int(row["size_bytes"]), str(row["sha256"])
 
 
+def _section_rows(parsed: ParsedDocument) -> list[_SectionRow]:
+    """Derive the searchable sections of *parsed* with the canonical parser."""
+    lines = split_document_lines(parsed.content)
+    _frontmatter_range, body_start = frontmatter_line_range(parsed.content)
+    rows: list[_SectionRow] = []
+    for section in derive_sections(lines, body_start, len(lines)):
+        text = "\n".join(lines[section.start_line - 1 : section.end_line])
+        rows.append(
+            _SectionRow(
+                section=section,
+                body=text,
+                size_bytes=section.size_bytes,
+            )
+        )
+    return rows
+
+
+def _delete_index_rows(conn: DbConnection, project_key: str, path: str) -> None:
+    """Remove every derived row for one document path."""
+    key = (project_key, path)
+    conn.execute("DELETE FROM documents WHERE project_key = ? AND path = ?", key)
+    conn.execute("DELETE FROM search_index WHERE project_key = ? AND path = ?", key)
+    conn.execute("DELETE FROM section_index WHERE project_key = ? AND path = ?", key)
+
+
+def _delete_project_index_rows(conn: DbConnection, project_key: str) -> None:
+    """Wipe every derived row for one project."""
+    conn.execute("DELETE FROM documents WHERE project_key = ?", (project_key,))
+    conn.execute("DELETE FROM search_index WHERE project_key = ?", (project_key,))
+    conn.execute("DELETE FROM section_index WHERE project_key = ?", (project_key,))
+
+
 def _upsert_document(
     conn: DbConnection,
     parsed: ParsedDocument,
@@ -191,15 +226,16 @@ def _upsert_document(
     now = _now_iso()
     conn.execute(
         """INSERT OR REPLACE INTO documents
-           (project_key, path, id, title, folder, status, edit_policy,
+           (project_key, path, id, title, description, folder, status, edit_policy,
             frontmatter_json, sha256, mtime_ns, size_bytes,
             created_at, updated_at, indexed_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             parsed.project_key,
             parsed.path,
             parsed.id,
             parsed.title,
+            parsed.description,
             parsed.folder,
             parsed.status,
             parsed.edit_policy,
@@ -220,3 +256,35 @@ def _upsert_document(
         "INSERT INTO search_index (title, body, project_key, path) VALUES (?, ?, ?, ?)",
         (parsed.title, parsed.body, parsed.project_key, parsed.path),
     )
+    conn.execute(
+        "DELETE FROM section_index WHERE project_key = ? AND path = ?",
+        (parsed.project_key, parsed.path),
+    )
+    section_params = [
+        (
+            parsed.title,
+            " > ".join(row.section.heading_path),
+            row.body,
+            parsed.project_key,
+            parsed.path,
+            row.section.section_id,
+            row.section.kind,
+            row.section.heading_text,
+            json.dumps(row.section.heading_path),
+            row.section.level,
+            row.section.start_line,
+            row.section.end_line,
+            row.section.content_sha256,
+            row.size_bytes,
+        )
+        for row in _section_rows(parsed)
+    ]
+    if section_params:
+        conn.executemany(
+            """INSERT INTO section_index (
+                   title, heading, body, project_key, path, section_id, kind,
+                   heading_text, heading_path_json, level, start_line, end_line,
+                   content_sha256, size_bytes
+               ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            section_params,
+        )

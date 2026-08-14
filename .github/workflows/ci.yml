@@ -19,17 +19,19 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13"]
+        # Must list every minor allowed by requires-python in pyproject.toml.
+        # Enforced by test_supported_python_range_matches_ci.
+        python-version: ["3.12", "3.13", "3.14"]
     env:
       UV_FROZEN: "1"
     steps:
       - name: Check out source
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Install uv and Python
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
           version: "0.11.16"
           python-version: ${{ matrix.python-version }}
@@ -79,3 +81,97 @@ jobs:
         run: |
           wheel="$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
           uv run --isolated --no-project --with "$wheel" ferumind --help
+
+  # ── MCP SDK compatibility matrix ──────────────────────────────────────────
+  #
+  # Ferumind reaches past the SDK's public API in two places (see
+  # src/ferumind/mcp/sdk_internals.py), so every version the declared range
+  # admits has to be proved against the boundary rather than assumed.
+  #
+  # The rows are RESOLVED FROM pyproject.toml AT RUN TIME, never listed here.
+  # Today `mcp>=2.0.0,<3` admits exactly one stable release, so this matrix has
+  # ONE row — every other 2.x artifact on PyPI is an alpha, beta, or rc, which
+  # Ferumind does not claim to support. That single row is the honest amount of
+  # evidence available; hardcoding three rows would install 2.0.0 three times
+  # and report three green rows for one version's worth of work. When the next
+  # stable 2.x ships, this matrix grows on its own. Do not list versions here.
+  resolve-mcp-matrix:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    outputs:
+      versions: ${{ steps.resolve.outputs.versions }}
+    env:
+      UV_FROZEN: "1"
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.16"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --all-extras --dev
+
+      # Exits non-zero rather than emitting an empty set: a matrix that runs
+      # zero rows reports green having proved nothing.
+      - name: Resolve the SDK versions to prove
+        id: resolve
+        run: uv run python scripts/mcp_matrix_versions.py --github-output "$GITHUB_OUTPUT"
+
+  mcp-sdk-matrix:
+    needs: resolve-mcp-matrix
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        mcp-version: ${{ fromJSON(needs.resolve-mcp-matrix.outputs.versions) }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Install uv and Python
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          version: "0.11.16"
+          python-version: "3.12"
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+
+      - name: Install locked dependencies
+        run: uv sync --frozen --all-extras --dev
+
+      # This row deliberately deviates from uv.lock, so UV_FROZEN is not set on
+      # this job. `--python` is explicit because `uv pip install` otherwise
+      # targets VIRTUAL_ENV rather than the project environment — during
+      # REL-021 that silently modified the wrong .venv, and it was reproduced
+      # again while building this matrix. Do not drop the flag.
+      - name: Install the SDK version under test
+        env:
+          MCP_VERSION: ${{ matrix.mcp-version }}
+        run: uv pip install --python .venv/bin/python "mcp==${MCP_VERSION}"
+
+      # `--no-sync` is load-bearing: a plain `uv run` re-syncs the environment
+      # and reinstalls the LOCKED SDK over the pin above, silently turning this
+      # row back into a duplicate of the lock. FERUMIND_EXPECTED_MCP_VERSION
+      # makes that failure loud instead — the suite asserts the running SDK
+      # version in-process and refuses to pass on any other.
+      - name: Prove the boundary against this SDK version
+        env:
+          FERUMIND_EXPECTED_MCP_VERSION: ${{ matrix.mcp-version }}
+        run: |
+          uv run --no-sync pytest \
+            tests/integration/test_mcp_surface.py \
+            tests/unit/test_mcp_hardening.py \
+            tests/unit/test_call_observation_middleware.py \
+            tests/integration/test_file_surface.py \
+            -q

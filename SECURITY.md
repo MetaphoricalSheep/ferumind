@@ -6,6 +6,13 @@ Ferumind 0.1 is a single-user, local-first system. The supported server
 transport is local stdio. Direct SSE and streamable HTTP transports fail
 closed in code.
 
+`ferumind dashboard` is not a server transport. It is a separate read-only
+operator process bound unconditionally to `127.0.0.1`, with a localhost Host
+allowlist, self-only content policy, explicit static-asset routes, and no CORS
+or mutation endpoints. It is never connected to the MCP tunnel. An operator
+administering another machine should use SSH local port forwarding; Ferumind
+does not provide a public-bind option.
+
 The public-tree check is necessary but not sufficient for publishing: it
 checks current tracked path names and workflow pins, not file contents or Git
 history. Review both the current content and the complete history before
@@ -89,7 +96,9 @@ configured workspace/project boundary. Relevant controls include:
   public-address enforcement, response-encoding checks, timeouts, and byte
   limits;
 - private workspace/database/snapshot/secret permissions;
-- metadata-only MCP observations and generic internal errors;
+- metadata-only MCP observations, private metadata-only runtime diagnostics,
+  and generic correlated internal errors;
+- a loopback-only, read-only operator dashboard with no external assets;
 - disabled direct network transports.
 
 The following are outside the current trust boundary:
@@ -116,7 +125,7 @@ Remote support is not complete until all of these are implemented and tested:
 3. TLS at the only ingress, no direct application port exposure, and trusted
    proxy configuration with an explicit host/origin policy.
 4. Request-body, response, rate, concurrency, upload, and wall-clock limits at
-   the ingress. `get_context` is intentionally uncapped by the v2 product
+   the ingress. `get_context` is intentionally uncapped by the product
    contract, so the gateway and workspace sizing policy must account for it.
 5. A dedicated unprivileged service account, a non-group-writable checkout,
    workspace directories at `0700`, secret files at `0600`, and encrypted,

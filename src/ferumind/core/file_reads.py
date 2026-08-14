@@ -23,6 +23,7 @@ from typing import Final, Literal
 from ferumind.core.errors import (
     FileNotFoundFerumindError,
     FileTooLargeError,
+    RenditionTooLargeError,
     ValidationError,
 )
 from ferumind.core.file_uri import build_file_uri
@@ -47,7 +48,7 @@ from ferumind.core.renditions import (
     render_image_context,
 )
 from ferumind.core.types import StrictModel
-from ferumind.core.writes import MAX_UPLOAD_BYTES
+from ferumind.core.write_limits import MAX_UPLOAD_BYTES
 
 #: Absolute ceiling for resolving any project file, whatever the caller.
 #: Equal to the largest file Ferumind will assemble on upload — refusing to
@@ -266,11 +267,23 @@ def read_file_for_context(
     digest = file_sha256(resolved.absolute)
 
     if resolved.context_support == "image":
-        rendition = render_image_context(
-            resolved.absolute,
-            max_edge=max_image_edge,
-            quality=image_quality,
-        )
+        try:
+            rendition = render_image_context(
+                resolved.absolute,
+                max_edge=max_image_edge,
+                quality=image_quality,
+            )
+        except RenditionTooLargeError:
+            # Every encoding would have been larger than the original, so
+            # there is nothing to gain by returning one. The original is by
+            # definition small here; the resource link already carries it.
+            return FileContextResult(
+                file=resolved,
+                representation="resource_only",
+                sha256=digest,
+                sidecar=sidecar,
+                reason="no_rendition_smaller_than_original",
+            )
         return FileContextResult(
             file=resolved,
             representation="image",

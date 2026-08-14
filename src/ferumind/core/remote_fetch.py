@@ -1,6 +1,6 @@
 """SSRF-hardened streaming fetch for host-supplied file references.
 
-Backs ``upload_library_file(s)_from_chatgpt`` (``core.writes``): ChatGPT's
+Backs ``upload_library_file(s)_from_chatgpt`` (``core.upload_writes``): ChatGPT's
 ``openai/fileParams`` MCP extension hands the server a temporary, authorized
 ``download_url`` rather than raw bytes or a server-local path. This module
 downloads from that URL directly — streamed, size-capped, and validated —
@@ -29,9 +29,11 @@ Defense in depth against SSRF:
   DNS resolver is not independently interruptible, so production egress must
   also enforce an outer request deadline.
 
-The temporary URL itself is never logged (only the hostname appears in
-error messages) and is never persisted anywhere — it exists only for the
-duration of one ``fetch_remote_file`` call.
+The temporary URL itself is never logged. ``httpx`` would emit the full
+request URL at INFO, so ``core.logging_setup.PINNED_LOGGERS`` clamps that
+logger to WARNING regardless of ``FERUMIND_LOG_LEVEL``. Only the hostname
+appears in error messages, and the URL is never persisted anywhere — it exists
+only for the duration of one ``fetch_remote_file`` call.
 """
 
 from __future__ import annotations

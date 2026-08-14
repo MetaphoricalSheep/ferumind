@@ -8,7 +8,11 @@ from pathlib import Path
 import pytest
 from PIL import Image
 
-from ferumind.core.errors import FileTooLargeError, ValidationError
+from ferumind.core.errors import (
+    FileTooLargeError,
+    RenditionTooLargeError,
+    ValidationError,
+)
 from ferumind.core.renditions import (
     DEFAULT_IMAGE_EDGE,
     MAX_IMAGE_EDGE,
@@ -16,7 +20,9 @@ from ferumind.core.renditions import (
     MAX_IMAGE_RENDITION_BYTES,
     MIN_IMAGE_EDGE,
     MIN_IMAGE_QUALITY,
+    MIN_RENDITION_BYTE_CEILING,
     render_image_context,
+    rendition_ceiling,
 )
 
 
@@ -207,6 +213,56 @@ class TestBounds:
         assert rendition.mime_type == "image/png"
         assert rendition.size_bytes <= MAX_IMAGE_RENDITION_BYTES
         assert rendition.size_limited is True
+
+
+class TestNeverLargerThanTheOriginal:
+    """A rendition that inflates defeats the purpose of bounding anything.
+
+    Observed live on 2026-08-04 (REL-030 defect 2): a 4,217,605-byte original
+    came back as a 4,635,704-byte rendition, +9.9%. Tightening
+    ``MAX_IMAGE_RENDITION_BYTES`` to 64 KiB shrank the blast radius but did
+    not close the hole — a source already saved below the cap can still
+    re-encode larger, which is what these tests pin.
+    """
+
+    def test_low_quality_source_does_not_re_encode_larger(self, tmp_path: Path) -> None:
+        # Quality 20 is well under the default encode quality of 78, so a
+        # naive re-encode at the same geometry inflates. Measured at 46,061
+        # in, 61,669 out (1.34x) before the per-file ceiling landed.
+        source = tmp_path / "already-squeezed.jpg"
+        noisy_image(512, 512).save(source, format="JPEG", quality=20, optimize=True)
+        original_size = source.stat().st_size
+        assert original_size < MAX_IMAGE_RENDITION_BYTES, "fixture must sit under the global cap"
+
+        rendition = render_image_context(source)
+
+        assert rendition.size_bytes <= original_size
+        assert rendition.size_bytes <= MAX_IMAGE_RENDITION_BYTES
+
+    def test_ceiling_is_the_tighter_of_the_cap_and_the_original(self) -> None:
+        assert rendition_ceiling(4_217_605) == MAX_IMAGE_RENDITION_BYTES
+        assert rendition_ceiling(46_061) == 46_061
+        # Container overhead dominates below the floor, so the rule lifts
+        # rather than making small images unrenderable.
+        assert rendition_ceiling(200) == MIN_RENDITION_BYTE_CEILING
+        assert rendition_ceiling(0) == MIN_RENDITION_BYTE_CEILING
+
+    def test_unfittable_source_raises_the_narrow_rendition_error(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from ferumind.core import renditions
+
+        # Drive both bounds to zero so no geometry can satisfy the ceiling.
+        monkeypatch.setattr(renditions, "MIN_RENDITION_BYTE_CEILING", 1)
+        monkeypatch.setattr(renditions, "MAX_IMAGE_RENDITION_BYTES", 1)
+        source = tmp_path / "photo.jpg"
+        noisy_image(900, 700).save(source, format="JPEG", quality=90)
+
+        with pytest.raises(RenditionTooLargeError) as excinfo:
+            render_image_context(source)
+        # Still FILE_TOO_LARGE on the wire: this is a narrowing, not a new code.
+        assert excinfo.value.code == "FILE_TOO_LARGE"
+        assert isinstance(excinfo.value, FileTooLargeError)
 
 
 class TestFailureModes:

@@ -10,10 +10,9 @@
    ```
 2. Verify generated files exist:
    - `.cursor/rules/`
-   - `CLAUDE.md` and `.claude/skills/`
+   - `CLAUDE.md`, `.claude/skills/`, `.claude/agents/`
    - `.github/copilot-instructions.md` and `.github/instructions/`
    - `.codex/README.md`
 
-## Summary
-
-The script generates equivalent local agent configs from the OpenCode source (AGENTS.md + .opencode/). The generated files are Git-ignored and must not be edited directly.
+The source is `AGENTS.md` plus `.opencode/`. Everything above is Git-ignored
+and generated; edit the source, never the output.

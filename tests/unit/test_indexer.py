@@ -13,12 +13,18 @@ from ferumind.core.indexer import (
     remove_from_index,
 )
 from ferumind.core.paths import WorkspaceRoot
+from tests.conftest import TEST_DESCRIPTION
 
 
 def _write_doc(workspace: WorkspaceRoot, project: str, rel: str, title: str) -> None:
     path = workspace / "projects" / project / rel
     path.parent.mkdir(parents=True, exist_ok=True)
-    fm = generate_frontmatter(doc_id=f"doc_{title.lower()}", project_key=project, title=title)
+    fm = generate_frontmatter(
+        description=TEST_DESCRIPTION,
+        doc_id=f"doc_{title.lower()}",
+        project_key=project,
+        title=title,
+    )
     path.write_text(fm + f"# {title}\n\ncontent for {title}\n", encoding="utf-8")
 
 
@@ -33,10 +39,16 @@ def test_index_project_indexes_and_prunes(
     assert result.errors == 0
 
     row = conn.execute(
-        "SELECT folder, status, edit_policy FROM documents WHERE project_key = ? AND path = ?",
+        "SELECT folder, status, edit_policy, description "
+        "FROM documents WHERE project_key = ? AND path = ?",
         (project, "canvases/a.md"),
     ).fetchone()
-    assert (row["folder"], row["status"], row["edit_policy"]) == ("canvases", "active", "free")
+    assert (row["folder"], row["status"], row["edit_policy"], row["description"]) == (
+        "canvases",
+        "active",
+        "free",
+        TEST_DESCRIPTION,
+    )
 
     # Delete a file on disk; re-indexing prunes its rows.
     (workspace / "projects" / project / "memory/b.md").unlink()
@@ -116,8 +128,16 @@ def test_rebuild_index_from_scratch(
     _write_doc(workspace, project, "canvases/a.md", "Alpha")
     index_project(conn, workspace, project)
     # Poison the index; rebuild must converge back to disk truth.
-    conn.execute("DELETE FROM documents WHERE project_key = ?", (project,))
+    conn.execute(
+        "UPDATE documents SET description = 'stale' WHERE project_key = ? AND path = ?",
+        (project, "canvases/a.md"),
+    )
     conn.commit()
     result = rebuild_index(conn, workspace, [project])
     assert result.documents_indexed == 3  # spine + rules seed + a.md
     assert get_indexed_signature(conn, project, "canvases/a.md") is not None
+    restored = conn.execute(
+        "SELECT description FROM documents WHERE project_key = ? AND path = ?",
+        (project, "canvases/a.md"),
+    ).fetchone()["description"]
+    assert restored == TEST_DESCRIPTION

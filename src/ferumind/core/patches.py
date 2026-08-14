@@ -2,7 +2,7 @@
 
 These helpers take a document's current content plus a target descriptor and
 return a :class:`PreparedPatch` describing the *entire* resulting file. They
-do not touch the filesystem or the database; :mod:`ferumind.core.writes` owns
+do not touch the filesystem or the database; :mod:`ferumind.core.patch_writes` owns
 snapshotting, operation recording, and applying. Keeping the transforms here
 prevents patch logic from leaking into MCP/CLI layers.
 """
@@ -50,6 +50,7 @@ from ferumind.core.frontmatter import (
     is_managed_markdown,
     parse_frontmatter,
     refresh_updated_if_managed,
+    validate_description,
     validate_edit_policy,
     validate_status,
 )
@@ -521,19 +522,8 @@ def prepare_multi_edit_patch(content: str, *, edits: Sequence[ExactEdit]) -> Pre
     )
 
 
-def prepare_frontmatter_patch(
-    content: str,
-    *,
-    set_values: JsonObject,
-    remove_keys: Sequence[str],
-) -> PreparedPatch:
-    """Set or remove individual frontmatter keys, protecting managed identity keys.
-
-    Rewrites the frontmatter block from the parsed mapping (YAML comments are
-    not preserved). Identity/lineage keys (``id``/``type``/``project``/
-    ``created``) and the automatic ``updated`` timestamp cannot be set or
-    removed.
-    """
+def _validate_frontmatter_patch_keys(set_values: JsonObject, remove_keys: Sequence[str]) -> None:
+    """Validate the requested key sets before parsing or rewriting content."""
     if not set_values and not remove_keys:
         raise ValidationError("Nothing to change: provide set values and/or remove keys")
     overlap = sorted(set(set_values) & set(remove_keys))
@@ -550,24 +540,46 @@ def prepare_frontmatter_patch(
             details={"protected_keys": list(protected)},
         )
 
-    fm_block, body = extract_frontmatter_block(content)
-    if not fm_block:
-        raise FrontmatterRequiredError("Document has no frontmatter block to edit")
-    frontmatter = parse_frontmatter(content)
 
-    status_value = set_values.get("status")
-    if status_value is not None:
+def _validate_frontmatter_behavior_values(set_values: JsonObject) -> None:
+    """Validate optional status and edit-policy values in a patch request."""
+    if "status" in set_values:
         try:
-            validate_status(str(status_value))
+            validate_status(str(set_values["status"]))
         except FrontmatterInvalidError as exc:
             raise ValidationError(str(exc)) from exc
-    policy_value = set_values.get("edit_policy")
-    if policy_value is not None:
+    if "edit_policy" in set_values:
         try:
-            validate_edit_policy(str(policy_value))
+            validate_edit_policy(str(set_values["edit_policy"]))
         except FrontmatterInvalidError as exc:
             raise ValidationError(str(exc)) from exc
 
+
+def _validate_frontmatter_description_change(
+    content: str, set_values: JsonObject, remove_keys: Sequence[str]
+) -> None:
+    """Require a valid description after edits to managed frontmatter."""
+    # ``description`` is required, not protected: an agent that notices a stale
+    # one should be able to rewrite it through this ordinary flow. What it may
+    # not do is leave the document without one, so a set value is validated and
+    # a removal is refused outright on a managed document.
+    if "description" in set_values:
+        try:
+            validate_description(set_values["description"])
+        except FrontmatterInvalidError as exc:
+            raise ValidationError(str(exc)) from exc
+    if "description" in remove_keys and is_managed_markdown(content):
+        raise ValidationError(
+            "description is required on a managed document and cannot be removed; "
+            "set a new one instead",
+            details={"required_keys": ["description"]},
+        )
+
+
+def _remove_frontmatter_keys(
+    frontmatter: JsonObject, set_values: JsonObject, remove_keys: Sequence[str]
+) -> JsonObject:
+    """Apply validated set/remove operations to a copied mapping."""
     missing = sorted(key for key in remove_keys if key not in frontmatter)
     if missing:
         raise ValidationError(
@@ -579,6 +591,30 @@ def prepare_frontmatter_patch(
     new_frontmatter.update(set_values)
     for key in remove_keys:
         del new_frontmatter[key]
+    return new_frontmatter
+
+
+def prepare_frontmatter_patch(
+    content: str,
+    *,
+    set_values: JsonObject,
+    remove_keys: Sequence[str],
+) -> PreparedPatch:
+    """Set or remove individual frontmatter keys, protecting managed identity keys.
+
+    Rewrites the frontmatter block from the parsed mapping (YAML comments are
+    not preserved). Identity/lineage keys (``id``/``type``/``project``/
+    ``created``) and the automatic ``updated`` timestamp cannot be set or
+    removed.
+    """
+    _validate_frontmatter_patch_keys(set_values, remove_keys)
+    fm_block, body = extract_frontmatter_block(content)
+    if not fm_block:
+        raise FrontmatterRequiredError("Document has no frontmatter block to edit")
+    frontmatter = parse_frontmatter(content)
+    _validate_frontmatter_behavior_values(set_values)
+    _validate_frontmatter_description_change(content, set_values, remove_keys)
+    new_frontmatter = _remove_frontmatter_keys(frontmatter, set_values, remove_keys)
 
     dumped = yaml.safe_dump(
         new_frontmatter, sort_keys=False, default_flow_style=False, allow_unicode=True

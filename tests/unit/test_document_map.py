@@ -20,8 +20,11 @@ from ferumind.core.errors import (
     ValidationError,
 )
 from ferumind.core.frontmatter import generate_frontmatter
+from tests.conftest import TEST_DESCRIPTION
 
-FM = generate_frontmatter(doc_id="doc_x", project_key="demo", title="Doc")
+FM = generate_frontmatter(
+    description=TEST_DESCRIPTION, doc_id="doc_x", project_key="demo", title="Doc"
+)
 BODY = (
     "intro paragraph\n"
     "\n"
@@ -49,9 +52,21 @@ def test_map_sections_skip_code_fences_and_hash_ranges() -> None:
     assert doc_map.sections[0].kind == "preamble"
     lines = split_document_lines(CONTENT)
     for section in doc_map.sections:
-        expected = compute_sha256("\n".join(lines[section.start_line - 1 : section.end_line]))
+        slice_text = "\n".join(lines[section.start_line - 1 : section.end_line])
+        expected = compute_sha256(slice_text)
         assert section.content_sha256 == expected
+        assert section.size_bytes == len(slice_text.encode("utf-8"))
     assert doc_map.document_sha256 == compute_sha256(CONTENT)
+
+
+def test_map_sections_expose_size_bytes_matching_line_slice() -> None:
+    doc_map = build_document_map(content=CONTENT, project_key="demo", path="canvases/d.md")
+    lines = split_document_lines(CONTENT)
+    assert doc_map.sections
+    for section in doc_map.sections:
+        slice_text = "\n".join(lines[section.start_line - 1 : section.end_line])
+        assert section.size_bytes == len(slice_text.encode("utf-8"))
+        assert section.size_bytes > 0
 
 
 def test_map_heading_paths_nest() -> None:

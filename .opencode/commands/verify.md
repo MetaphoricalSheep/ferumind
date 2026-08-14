@@ -16,9 +16,5 @@
    - Coverage too low → add tests
 3. Re-run `scripts/verify.sh` until it passes.
 
-## Verification
-
-- [ ] `ruff format --check .` passes
-- [ ] `ruff check .` passes
-- [ ] `pyright` passes
-- [ ] `pytest --cov` passes with >= 80% coverage
+The script is the checklist: it exits non-zero on the first failing stage and
+names it. Do not skip a stage or relax a threshold to get past one.

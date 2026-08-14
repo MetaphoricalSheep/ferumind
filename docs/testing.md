@@ -8,12 +8,14 @@ Run the complete local quality gate before publishing:
 just verify
 ```
 
-The pipeline first rejects unsafe tracked public files and movable GitHub
-Action references, then checks formatting, linting, strict typing, tests, and
-coverage. The equivalent commands are:
+The pipeline runs six steps in order: it rejects unsafe tracked public files
+and movable GitHub Action references, holds the complexity ratchet, then checks
+formatting, linting, strict typing, and tests with coverage. The equivalent
+commands are:
 
 ```bash
 uv run python scripts/check_public_tree.py
+uv run python scripts/complexity_ratchet.py
 uv run ruff format --check .
 uv run ruff check .
 uv run pyright

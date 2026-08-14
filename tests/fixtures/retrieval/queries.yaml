@@ -1,0 +1,769 @@
+# Gold labels for the retrieval benchmark. See README.md for how to add a case.
+#
+# Produced by the blind two-pass procedure: three independent agents wrote
+# candidate queries from invented intents before any document existed, and
+# different agents wrote the documents from those same intents without ever
+# seeing the queries. Selection was mechanical, never by taste --- paraphrase
+# cases take the lowest stemmed overlap against their gold span, every other
+# category takes a fixed positional pick.
+#
+# 'notes' records which model produced the selected phrasing and that case's
+# stemmed content-word overlap with its gold span.
+# RET-06: semantic label audit + post-distractor also_relevant/gold merges.
+
+- id: q-01-stable-facts-natural
+  category: stable-facts
+  phrasing: natural
+  query: What part of the radio spectrum do the stations transmit on?
+  gold:
+  - path: library/radio-link-budget.md
+    section_id: band-and-transmit-hardware
+    evidence: Every station talks to the collector over LoRa at 868 MHz
+  - path: library/lora-duty-cycle-notes.md
+    section_id: the-regulatory-framework
+    evidence: which is where our LoRa radios operate
+  notes: opus; stem overlap 1; RET-06 distractor audit — additional gold
+- id: q-01-stable-facts-keyword
+  category: stable-facts
+  phrasing: keyword
+  query: radio frequency weather stations
+  gold:
+  - path: library/radio-link-budget.md
+    section_id: band-and-transmit-hardware
+    evidence: Every station talks to the collector over LoRa at 868 MHz
+  - path: library/lora-duty-cycle-notes.md
+    section_id: the-regulatory-framework
+    evidence: which is where our LoRa radios operate
+  notes: sonnet; stem overlap 1; RET-06 distractor audit — additional gold
+- id: q-02-stable-facts-natural
+  category: stable-facts
+  phrasing: natural
+  query: how far apart can two stations be and still talk to each other
+  gold:
+  - path: library/radio-link-budget.md
+    section_id: the-longest-hop-that-actually-works
+    evidence: The furthest pair of stations that hold a reliable link sit 3.1 km apart
+  notes: sonnet; stem overlap 2
+- id: q-02-stable-facts-keyword
+  category: stable-facts
+  phrasing: keyword
+  query: maximum station range
+  gold:
+  - path: library/radio-link-budget.md
+    section_id: the-longest-hop-that-actually-works
+    evidence: The furthest pair of stations that hold a reliable link sit 3.1 km apart
+  notes: haiku; stem overlap 1
+- id: q-03-stable-facts-natural
+  category: stable-facts
+  phrasing: natural
+  query: How many weather stations are in the network?
+  gold:
+  - path: library/station-inventory.md
+    section_id: station-inventory
+    evidence: Twelve stations are in the ground along the valley
+  - path: library/collector-housekeeping.md
+    section_id: collector-housekeeping
+    evidence: the only machine that sees readings from all twelve AWS stations at once
+  notes: haiku; stem overlap 2; RET-06 distractor audit — additional gold
+- id: q-03-stable-facts-keyword
+  category: stable-facts
+  phrasing: keyword
+  query: number of stations
+  gold:
+  - path: library/station-inventory.md
+    section_id: station-inventory
+    evidence: Twelve stations are in the ground along the valley
+  - path: library/collector-housekeeping.md
+    section_id: collector-housekeeping
+    evidence: the only machine that sees readings from all twelve AWS stations at once
+  notes: opus; stem overlap 1; RET-06 distractor audit — additional gold
+- id: q-04-changed-facts-natural
+  category: changed-facts
+  phrasing: natural
+  query: How frequently does data reach the collector now?
+  gold:
+  - path: memory/decisions/2026-02-upload-interval.md
+    section_id: upload-interval
+    evidence: Stations now push a reading to the collector every five minutes
+  also_relevant:
+  - archive/canvases/upload-schedule-original.md
+  notes: opus; stem overlap 1
+- id: q-04-changed-facts-keyword
+  category: changed-facts
+  phrasing: keyword
+  query: current upload interval
+  gold:
+  - path: memory/decisions/2026-02-upload-interval.md
+    section_id: upload-interval
+    evidence: Stations now push a reading to the collector every five minutes
+  also_relevant:
+  - archive/canvases/upload-schedule-original.md
+  notes: sonnet; stem overlap 0
+- id: q-05-changed-facts-natural
+  category: changed-facts
+  phrasing: natural
+  query: what was the reporting frequency before it got changed
+  gold:
+  - path: archive/canvases/upload-schedule-original.md
+    section_id: upload-schedule
+    evidence: Every station uploads on a 15-minute cycle
+  include_archived: true
+  notes: sonnet; stem overlap 0; RET-06 audit — historical prior-state need; kept despite changed-facts
+    current-gold convention; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/lora-duty-cycle-notes.md
+- id: q-05-changed-facts-keyword
+  category: changed-facts
+  phrasing: keyword
+  query: previous upload schedule
+  gold:
+  - path: archive/canvases/upload-schedule-original.md
+    section_id: upload-schedule
+    evidence: Every station uploads on a 15-minute cycle
+  include_archived: true
+  notes: haiku; stem overlap 1; RET-06 audit — historical prior-state need; kept despite changed-facts
+    current-gold convention; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/lora-duty-cycle-notes.md
+- id: q-06-dates-natural
+  category: dates
+  phrasing: natural
+  query: When did the reporting frequency change?
+  gold:
+  - path: memory/decisions/2026-02-upload-interval.md
+    section_id: upload-interval
+    evidence: This replaces the fifteen-minute interval the network has run on since the first stations
+      went in
+  notes: haiku; stem overlap 0
+- id: q-06-dates-keyword
+  category: dates
+  phrasing: keyword
+  query: when the interval changed
+  gold:
+  - path: memory/decisions/2026-02-upload-interval.md
+    section_id: upload-interval
+    evidence: This replaces the fifteen-minute interval the network has run on since the first stations
+      went in
+  notes: opus; stem overlap 1
+- id: q-07-procedures-natural
+  category: procedures
+  phrasing: natural
+  query: How do I check the rainfall sensor is reading correctly?
+  gold:
+  - path: library/calibrating-a-rain-gauge.md
+    section_id: the-procedure
+    evidence: Pour steadily over roughly five minutes, not all at once
+  notes: opus; stem overlap 0; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/tipping-bucket-leveling.md
+- id: q-07-procedures-keyword
+  category: procedures
+  phrasing: keyword
+  query: rain gauge accuracy check
+  gold:
+  - path: library/calibrating-a-rain-gauge.md
+    section_id: the-procedure
+    evidence: Pour steadily over roughly five minutes, not all at once
+  notes: sonnet; stem overlap 0; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/tipping-bucket-leveling.md
+- id: q-08-procedures-natural
+  category: procedures
+  phrasing: natural
+  query: what needs to happen before anyone climbs a mast
+  gold:
+  - path: rules/fieldwork-safety.md
+    section_id: working-alone
+    evidence: Nobody climbs a mast alone, full stop
+  notes: sonnet; stem overlap 2
+- id: q-08-procedures-keyword
+  category: procedures
+  phrasing: keyword
+  query: mast climb procedures
+  gold:
+  - path: rules/fieldwork-safety.md
+    section_id: working-alone
+    evidence: Nobody climbs a mast alone, full stop
+  notes: haiku; stem overlap 2
+- id: q-09-procedures-natural
+  category: procedures
+  phrasing: natural
+  query: What's involved in getting a station working?
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: commissioning-checklist
+    evidence: Power is applied first and the logger's own startup sequence watched on a laptop over the
+      debug cable before anything is buttoned up
+  notes: haiku; stem overlap 1; RET-06 audit — evidence was heading-level assertion, not procedure
+- id: q-09-procedures-keyword
+  category: procedures
+  phrasing: keyword
+  query: new station setup
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: commissioning-checklist
+    evidence: Power is applied first and the logger's own startup sequence watched on a laptop over the
+      debug cable before anything is buttoned up
+  notes: opus; stem overlap 1; RET-06 audit — evidence was heading-level assertion, not procedure
+- id: q-10-decisions-natural
+  category: decisions
+  phrasing: natural
+  query: Why did we go with the radio we use instead of the other options?
+  gold:
+  - path: memory/decisions/2025-11-radio-choice.md
+    section_id: why-lora-over-a-cellular-modem
+    evidence: twelve stations each carrying a SIM and a data contract is a recurring cost the group would
+      be committed to indefinitely
+  - path: memory/decisions/2025-11-radio-choice.md
+    section_id: why-868-mhz-over-433-mhz
+    evidence: An antenna tuned for 868 MHz is a good deal smaller than one tuned for 433 MHz
+  notes: opus; stem overlap 0; RET-06 audit — second gold for band decision
+- id: q-10-decisions-keyword
+  category: decisions
+  phrasing: keyword
+  query: why LoRa over other radio options
+  gold:
+  - path: memory/decisions/2025-11-radio-choice.md
+    section_id: why-lora-over-a-cellular-modem
+    evidence: twelve stations each carrying a SIM and a data contract is a recurring cost the group would
+      be committed to indefinitely
+  - path: memory/decisions/2025-11-radio-choice.md
+    section_id: why-868-mhz-over-433-mhz
+    evidence: An antenna tuned for 868 MHz is a good deal smaller than one tuned for 433 MHz
+  notes: sonnet; stem overlap 0; RET-06 audit — second gold for band decision
+- id: q-11-decisions-natural
+  category: decisions
+  phrasing: natural
+  query: how were the original station locations chosen
+  gold:
+  - path: memory/decisions/2025-09-site-selection.md
+    section_id: access
+    evidence: Every site chosen had to be reachable on foot from a place a car could actually park
+  - path: memory/decisions/2025-09-site-selection.md
+    section_id: exposure
+    evidence: Each site needed a clear view of sky for the solar panel and reasonable exposure to rainfall
+  - path: memory/decisions/2025-09-site-selection.md
+    section_id: landowner-permission
+    evidence: All four chosen sites sit on land where a personal connection to the landowner made asking
+      straightforward
+  - path: memory/decisions/2025-09-site-selection.md
+    section_id: distance-from-the-collector
+    evidence: The four sites were also chosen to sit within a radio hop or two of the collector at the
+      valley bottom
+  notes: sonnet; stem overlap 1; RET-06 audit — multi-criterion gold
+- id: q-11-decisions-keyword
+  category: decisions
+  phrasing: keyword
+  query: site location selection
+  gold:
+  - path: memory/decisions/2025-09-site-selection.md
+    section_id: access
+    evidence: Every site chosen had to be reachable on foot from a place a car could actually park
+  - path: memory/decisions/2025-09-site-selection.md
+    section_id: exposure
+    evidence: Each site needed a clear view of sky for the solar panel and reasonable exposure to rainfall
+  - path: memory/decisions/2025-09-site-selection.md
+    section_id: landowner-permission
+    evidence: All four chosen sites sit on land where a personal connection to the landowner made asking
+      straightforward
+  - path: memory/decisions/2025-09-site-selection.md
+    section_id: distance-from-the-collector
+    evidence: The four sites were also chosen to sit within a radio hop or two of the collector at the
+      valley bottom
+  notes: haiku; stem overlap 1; RET-06 audit — multi-criterion gold
+- id: q-12-decisions-natural
+  category: decisions
+  phrasing: natural
+  query: Why start sending readings more frequently?
+  gold:
+  - path: memory/decisions/2026-02-upload-interval.md
+    section_id: what-prompted-it
+    evidence: how much sooner a gap like that would show up if stations were checking in more often than
+      once a quarter-hour
+  notes: haiku; stem overlap 0
+- id: q-12-decisions-keyword
+  category: decisions
+  phrasing: keyword
+  query: why send more often
+  gold:
+  - path: memory/decisions/2026-02-upload-interval.md
+    section_id: what-prompted-it
+    evidence: how much sooner a gap like that would show up if stations were checking in more often than
+      once a quarter-hour
+  notes: opus; stem overlap 1
+- id: q-13-gotchas-natural
+  category: gotchas
+  phrasing: natural
+  query: Why is moisture getting inside the equipment boxes?
+  gold:
+  - path: library/known-failure-modes.md
+    section_id: water-forming-inside-the-enclosure
+    evidence: once the internal air temperature drops below its dew point, moisture condenses on the coldest
+      available surface
+  notes: opus; stem overlap 1
+- id: q-13-gotchas-keyword
+  category: gotchas
+  phrasing: keyword
+  query: water inside the equipment housings
+  gold:
+  - path: library/known-failure-modes.md
+    section_id: water-forming-inside-the-enclosure
+    evidence: once the internal air temperature drops below its dew point, moisture condenses on the coldest
+      available surface
+  notes: sonnet; stem overlap 0
+- id: q-14-gotchas-natural
+  category: gotchas
+  phrasing: natural
+  query: what keeps going wrong every year
+  gold:
+  - path: library/known-failure-modes.md
+    section_id: water-forming-inside-the-enclosure
+    evidence: this is not the first time this fault has been written up; expect to see it again
+  - path: memory/notes/damp-in-the-boxes.md
+    section_id: still-bugging-me
+    evidence: Two boxes wet on the same weekend
+  notes: sonnet; stem overlap 0; RET-06 audit — narrowest containing section
+- id: q-14-gotchas-keyword
+  category: gotchas
+  phrasing: keyword
+  query: recurring issue written up multiple times
+  gold:
+  - path: library/known-failure-modes.md
+    section_id: water-forming-inside-the-enclosure
+    evidence: this is not the first time this fault has been written up; expect to see it again
+  - path: memory/notes/damp-in-the-boxes.md
+    section_id: still-bugging-me
+    evidence: Two boxes wet on the same weekend
+  notes: haiku; stem overlap 2; RET-06 audit — narrowest containing section
+- id: q-15-gotchas-natural
+  category: gotchas
+  phrasing: natural
+  query: Why do measurements go wrong after heavy weather?
+  gold:
+  - path: library/known-failure-modes.md
+    section_id: corrupted-radio-frames-e-radio-crc
+    evidence: which is why this fault often turns up during or just after heavy rain
+  notes: haiku; stem overlap 1
+- id: q-15-gotchas-keyword
+  category: gotchas
+  phrasing: keyword
+  query: bad readings after storms
+  gold:
+  - path: library/known-failure-modes.md
+    section_id: corrupted-radio-frames-e-radio-crc
+    evidence: which is why this fault often turns up during or just after heavy rain
+  notes: opus; stem overlap 0
+- id: q-16-incidents-natural
+  category: incidents
+  phrasing: natural
+  query: Which station stopped reporting in the middle of winter?
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: what-happened
+    evidence: AWS-07 had already been silent for the best part of two days
+  notes: opus; stem overlap 0
+- id: q-16-incidents-keyword
+  category: incidents
+  phrasing: keyword
+  query: station that went offline in winter
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: what-happened
+    evidence: AWS-07 had already been silent for the best part of two days
+  notes: sonnet; stem overlap 0
+- id: q-17-incidents-natural
+  category: incidents
+  phrasing: natural
+  query: what was wrong with the station that went quiet and how was it fixed
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: the-actual-fault
+    evidence: the battery voltage read barely above four volts under load
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: getting-it-back-up
+    evidence: A replacement battery went in on the 17th and the station reported again within the hour
+  notes: sonnet; stem overlap 0; RET-06 audit — fault and fix both gold
+- id: q-17-incidents-keyword
+  category: incidents
+  phrasing: keyword
+  query: AWS-07 fault battery fix
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: the-actual-fault
+    evidence: the battery voltage read barely above four volts under load
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: getting-it-back-up
+    evidence: A replacement battery went in on the 17th and the station reported again within the hour
+  notes: haiku; stem overlap 1; RET-06 audit — fault and fix both gold
+- id: q-18-identifiers-natural
+  category: identifiers
+  phrasing: natural
+  query: What does the E-RAIN-STUCK error mean and how do you fix it?
+  gold:
+  - path: library/known-failure-modes.md
+    section_id: rain-gauge-reports-nothing-during-rain-e-rain-st
+    evidence: The tipping bucket mechanism has stopped registering tips even though water is clearly falling
+      on it
+  notes: haiku; stem overlap 0
+- id: q-18-identifiers-keyword
+  category: identifiers
+  phrasing: keyword
+  query: E-RAIN-STUCK
+  gold:
+  - path: library/known-failure-modes.md
+    section_id: rain-gauge-reports-nothing-during-rain-e-rain-st
+    evidence: The tipping bucket mechanism has stopped registering tips even though water is clearly falling
+      on it
+  notes: opus; stem overlap 0
+- id: q-19-identifiers-natural
+  category: identifiers
+  phrasing: natural
+  query: Which stations are still running firmware 1.5.0?
+  gold:
+  - path: library/station-inventory.md
+    section_id: station-inventory
+    evidence: AWS-09 and AWS-10 are the two still waiting on the 1.6.1 rollout
+  - path: canvases/firmware-1-6-2-notes.md
+    section_id: firmware-1-6-2-rollout-notes
+    evidence: AWS-09 and AWS-10 are on 1.5.0
+  notes: opus; stem overlap 2; RET-06 distractor audit — additional gold
+- id: q-19-identifiers-keyword
+  category: identifiers
+  phrasing: keyword
+  query: stations on firmware 1.5.0
+  gold:
+  - path: library/station-inventory.md
+    section_id: station-inventory
+    evidence: AWS-09 and AWS-10 are the two still waiting on the 1.6.1 rollout
+  - path: canvases/firmware-1-6-2-notes.md
+    section_id: firmware-1-6-2-rollout-notes
+    evidence: AWS-09 and AWS-10 are on 1.5.0
+  notes: sonnet; stem overlap 1; RET-06 distractor audit — additional gold
+- id: q-20-identifiers-natural
+  category: identifiers
+  phrasing: natural
+  query: everything on record about AWS-07
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: what-changed-afterwards
+    evidence: The rota now checks battery voltage trend, not just whether a signal is present
+  also_relevant:
+  - library/station-inventory.md
+  - memory/notes/battery-replacement-dates.md
+  notes: sonnet; stem overlap 0; RET-06 audit — companion docs also relevant
+- id: q-20-identifiers-keyword
+  category: identifiers
+  phrasing: keyword
+  query: AWS-07 complete history
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: what-changed-afterwards
+    evidence: The rota now checks battery voltage trend, not just whether a signal is present
+  also_relevant:
+  - library/station-inventory.md
+  - memory/notes/battery-replacement-dates.md
+  notes: haiku; stem overlap 0; RET-06 audit — companion docs also relevant
+- id: q-21-identifiers-natural
+  category: identifiers
+  phrasing: natural
+  query: What is the Kestrel-3 and where is it installed?
+  gold:
+  - path: library/station-inventory.md
+    section_id: station-inventory
+    evidence: each built around a Kestrel-3 logger board
+  notes: haiku; stem overlap 2
+- id: q-21-identifiers-keyword
+  category: identifiers
+  phrasing: keyword
+  query: Kestrel-3
+  gold:
+  - path: library/station-inventory.md
+    section_id: station-inventory
+    evidence: each built around a Kestrel-3 logger board
+  notes: opus; stem overlap 2
+- id: q-22-dates-natural
+  category: dates
+  phrasing: natural
+  query: Which batteries were replaced in December 2025?
+  gold:
+  - path: memory/notes/battery-replacement-dates.md
+    section_id: battery-replacement-dates
+    evidence: AWS-02 and AWS-05 both had their batteries changed in December 2025
+  notes: opus; stem overlap 3; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - memory/episodes/2025-12.md
+- id: q-22-dates-keyword
+  category: dates
+  phrasing: keyword
+  query: battery replacement December 2025
+  gold:
+  - path: memory/notes/battery-replacement-dates.md
+    section_id: battery-replacement-dates
+    evidence: AWS-02 and AWS-05 both had their batteries changed in December 2025
+  notes: sonnet; stem overlap 3; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - memory/episodes/2025-12.md
+- id: q-23-episode-natural
+  category: episode
+  phrasing: natural
+  query: firmware 1.6.1 rollout in March 2026
+  gold:
+  - path: memory/episodes/2026-03.md
+    section_id: 2026-03-02-firmware-1-6-1-rollout-begins
+    evidence: Started pushing 1.6.1 to the stations in reach of a direct connection first
+  notes: sonnet; stem overlap 0; RET-06 audit — query narrowed to labelled event
+- id: q-23-episode-keyword
+  category: episode
+  phrasing: keyword
+  query: March 2026 firmware 1.6.1 rollout
+  gold:
+  - path: memory/episodes/2026-03.md
+    section_id: 2026-03-02-firmware-1-6-1-rollout-begins
+    evidence: Started pushing 1.6.1 to the stations in reach of a direct connection first
+  notes: haiku; stem overlap 0; RET-06 audit — query narrowed to labelled event
+- id: q-24-paraphrase-natural
+  category: paraphrase
+  phrasing: natural
+  query: What did we decide about the thing that keeps the enclosures from filling with damp?
+  gold:
+  - path: canvases/enclosure-redesign.md
+    section_id: what-s-being-tried
+    evidence: is being moved to a small mesh pocket mounted near the lid
+  notes: opus; stem overlap 0; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/desiccant-maintenance.md
+  - archive/canvases/enclosure-vent-draft.md
+- id: q-24-paraphrase-keyword
+  category: paraphrase
+  phrasing: keyword
+  query: condensation moisture prevention
+  gold:
+  - path: canvases/enclosure-redesign.md
+    section_id: what-s-being-tried
+    evidence: is being moved to a small mesh pocket mounted near the lid
+  notes: haiku; stem overlap 0; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/desiccant-maintenance.md
+  - archive/canvases/enclosure-vent-draft.md
+- id: q-25-paraphrase-natural
+  category: paraphrase
+  phrasing: natural
+  query: How high are things installed?
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: mounting-and-mast-height
+    evidence: the mast is set at two metres above ground at every site except two
+  notes: haiku; stem overlap 0; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/antenna-mounting-hardware.md
+- id: q-25-paraphrase-keyword
+  category: paraphrase
+  phrasing: keyword
+  query: mounting height
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: mounting-and-mast-height
+    evidence: the mast is set at two metres above ground at every site except two
+  notes: opus; stem overlap 0; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/antenna-mounting-hardware.md
+- id: q-26-paraphrase-natural
+  category: paraphrase
+  phrasing: natural
+  query: How long is the power setup meant to last with no sunshine?
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: power-and-solar-sizing
+    evidence: keep a station running through fourteen days with no meaningful sun in midwinter
+  notes: opus; stem overlap 0
+- id: q-26-paraphrase-keyword
+  category: paraphrase
+  phrasing: keyword
+  query: power reserve without sun
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: power-and-solar-sizing
+    evidence: keep a station running through fourteen days with no meaningful sun in midwinter
+  notes: opus; stem overlap 1
+- id: q-27-paraphrase-natural
+  category: paraphrase
+  phrasing: natural
+  query: Is there a record of a problem that took much longer to diagnose than expected?
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: chasing-the-radio-theory
+    evidence: the group spent close to a week on the wrong theory before anyone actually opened the enclosure
+  notes: haiku; stem overlap 0; RET-06 audit — query contradicted gold
+- id: q-27-paraphrase-keyword
+  category: paraphrase
+  phrasing: keyword
+  query: fault-finding write-up
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: chasing-the-radio-theory
+    evidence: the group spent close to a week on the wrong theory before anyone actually opened the enclosure
+  notes: opus; stem overlap 0
+- id: q-28-paraphrase-natural
+  category: paraphrase
+  phrasing: natural
+  query: What did we agree nobody should ever do on their own?
+  gold:
+  - path: rules/fieldwork-safety.md
+    section_id: working-alone
+    evidence: If a second person isn't available for a mast job, the job waits for a weekend when one
+      is
+  notes: opus; stem overlap 0
+- id: q-28-paraphrase-keyword
+  category: paraphrase
+  phrasing: keyword
+  query: lone working rule
+  gold:
+  - path: rules/fieldwork-safety.md
+    section_id: working-alone
+    evidence: If a second person isn't available for a mast job, the job waits for a weekend when one
+      is
+  notes: sonnet; stem overlap 0
+- id: q-29-false-premise-natural
+  category: false-premise
+  phrasing: natural
+  query: reason readings are only sent every quarter of an hour
+  gold:
+  - path: memory/decisions/2026-02-upload-interval.md
+    section_id: upload-interval
+    evidence: Stations now push a reading to the collector every five minutes
+  also_relevant:
+  - archive/canvases/upload-schedule-original.md
+  include_archived: true
+  notes: sonnet; stem overlap 2
+- id: q-29-false-premise-keyword
+  category: false-premise
+  phrasing: keyword
+  query: 15 minute reporting interval
+  gold:
+  - path: memory/decisions/2026-02-upload-interval.md
+    section_id: upload-interval
+    evidence: Stations now push a reading to the collector every five minutes
+  also_relevant:
+  - archive/canvases/upload-schedule-original.md
+  include_archived: true
+  notes: haiku; stem overlap 1
+- id: q-30-false-premise-natural
+  category: false-premise
+  phrasing: natural
+  query: What's preventing AWS-07 from coming back online?
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: getting-it-back-up
+    evidence: A replacement battery went in on the 17th and the station reported again within the hour
+  notes: haiku; stem overlap 0
+- id: q-30-false-premise-keyword
+  category: false-premise
+  phrasing: keyword
+  query: AWS-07 still down
+  gold:
+  - path: memory/incidents/2026-01-aws-07-outage.md
+    section_id: getting-it-back-up
+    evidence: A replacement battery went in on the 17th and the station reported again within the hour
+  notes: opus; stem overlap 0
+- id: q-31-false-premise-natural
+  category: false-premise
+  phrasing: natural
+  query: Why does the network run on 433 MHz?
+  gold:
+  - path: library/radio-link-budget.md
+    section_id: band-and-transmit-hardware
+    evidence: Every station talks to the collector over LoRa at 868 MHz
+  also_relevant:
+  - memory/decisions/2025-11-radio-choice.md
+  - library/lora-duty-cycle-notes.md
+  notes: opus; stem overlap 2; RET-06 audit — corrective current band fact; RET-06 distractor audit —
+    also_relevant
+- id: q-31-false-premise-keyword
+  category: false-premise
+  phrasing: keyword
+  query: why does the network run on 433 MHz
+  gold:
+  - path: library/radio-link-budget.md
+    section_id: band-and-transmit-hardware
+    evidence: Every station talks to the collector over LoRa at 868 MHz
+  also_relevant:
+  - memory/decisions/2025-11-radio-choice.md
+  - library/lora-duty-cycle-notes.md
+  notes: sonnet; stem overlap 2; RET-06 audit — corrective current band fact; RET-06 distractor audit
+    — also_relevant
+- id: q-32-buried-evidence-natural
+  category: buried-evidence
+  phrasing: natural
+  query: mast height where a hedge blocked the sightline
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: mounting-and-mast-height
+    evidence: where a mature hedge on the sightline forced the crew to go up to two point six metres
+  notes: sonnet; stem overlap 1; RET-06 audit — query narrowed to buried exception
+- id: q-32-buried-evidence-keyword
+  category: buried-evidence
+  phrasing: keyword
+  query: 2.6 metre mast hedge exception
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: mounting-and-mast-height
+    evidence: where a mature hedge on the sightline forced the crew to go up to two point six metres
+  notes: haiku; stem overlap 0; RET-06 audit — query narrowed to buried exception
+- id: q-33-buried-evidence-natural
+  category: buried-evidence
+  phrasing: natural
+  query: How many days without sun were the panels sized for?
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: power-and-solar-sizing
+    evidence: the solar panel is sized to keep a station running through fourteen days
+  notes: haiku; stem overlap 3
+- id: q-33-buried-evidence-keyword
+  category: buried-evidence
+  phrasing: keyword
+  query: solar sizing days
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: power-and-solar-sizing
+    evidence: the solar panel is sized to keep a station running through fourteen days
+  notes: opus; stem overlap 3
+- id: q-34-multi-section-natural
+  category: multi-section
+  phrasing: natural
+  query: What was decided about where antennas go relative to the terrain?
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: radio-siting-and-line-of-sight
+    evidence: a shoulder of high ground directly on the path can drop a signal to nothing
+  notes: opus; stem overlap 0; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/path-loss-field-measurements.md
+- id: q-34-multi-section-keyword
+  category: multi-section
+  phrasing: keyword
+  query: antenna placement relative to terrain
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: radio-siting-and-line-of-sight
+    evidence: a shoulder of high ground directly on the path can drop a signal to nothing
+  notes: sonnet; stem overlap 0; RET-06 distractor audit — also_relevant
+  also_relevant:
+  - library/path-loss-field-measurements.md
+- id: q-35-multi-section-natural
+  category: multi-section
+  phrasing: natural
+  query: when is the final radio check repeated during commissioning
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: commissioning-checklist
+    evidence: the final radio check is repeated once everything is in its permanent position
+  notes: sonnet; stem overlap 1; RET-06 audit — query narrowed to labelled span
+- id: q-35-multi-section-keyword
+  category: multi-section
+  phrasing: keyword
+  query: final radio check permanent position
+  gold:
+  - path: canvases/station-rollout.md
+    section_id: commissioning-checklist
+    evidence: the final radio check is repeated once everything is in its permanent position
+  notes: haiku; stem overlap 0; RET-06 audit — query narrowed to labelled span

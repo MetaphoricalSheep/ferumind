@@ -6,6 +6,13 @@ the tool name, a server-generated correlation id, success/error, timing and
 payload sizes, argument keys (not values), and any metadata the MCP client
 exposed. Never stores document content, patch bodies, full request JSON, or
 full tool results. Secrets are replaced with ``[redacted]``.
+
+Identifier prefixes are cosmetic. Nothing parses, validates, or dispatches on
+them: rows are looked up by whole-string equality, and the column name already
+says what kind of id it holds. New ids therefore carry ``ID_PREFIX``, while
+rows written under the project's former name keep their ``lat_`` prefix
+unchanged and stay readable — there is no migration and no dual-prefix branch
+anywhere. Do not introduce a reader that assumes either form.
 """
 
 from __future__ import annotations
@@ -20,8 +27,10 @@ from datetime import UTC, datetime
 
 from ferumind.core.types import DbConnection, DbRow, JsonObject, StrictModel
 
-SERVER_BOOT_ID = f"lat_boot_{secrets.token_urlsafe(16)}"
-_PROCESS_ID = os.getpid()
+ID_PREFIX = "fm"
+
+SERVER_BOOT_ID = f"{ID_PREFIX}_boot_{secrets.token_urlsafe(16)}"
+PROCESS_ID = os.getpid()
 
 _CAP_CONTEXT_METRICS = 4 * 1024
 _CAP_ARGUMENT_KEYS = 4 * 1024
@@ -59,11 +68,11 @@ def _now_iso() -> str:
 
 
 def new_correlation_id() -> str:
-    return f"lat_corr_{uuid.uuid4().hex}"
+    return f"{ID_PREFIX}_corr_{uuid.uuid4().hex}"
 
 
 def _observation_id() -> str:
-    return f"lat_obs_{uuid.uuid4().hex}"
+    return f"{ID_PREFIX}_obs_{uuid.uuid4().hex}"
 
 
 def _redact_metadata(raw: JsonObject | None) -> tuple[JsonObject, list[str]]:
@@ -145,7 +154,7 @@ def record_mcp_call_observation(
             error_code,
             transport,
             SERVER_BOOT_ID,
-            _PROCESS_ID,
+            PROCESS_ID,
             client_name,
             client_version,
             protocol_version,
@@ -198,6 +207,30 @@ def list_observations(
 
 def get_observation(conn: DbConnection, call_id: str) -> McpCallObservationRecord | None:
     row = conn.execute("SELECT * FROM mcp_call_observations WHERE id = ?", (call_id,)).fetchone()
+    if row is None:
+        return None
+    return _row_to_observation(row)
+
+
+def get_observation_by_correlation_id(
+    conn: DbConnection, correlation_id: str
+) -> McpCallObservationRecord | None:
+    """Return the newest row for an opaque correlation id, if one exists.
+
+    Correlation ids are intentionally indexed but not constrained unique.
+    Existing databases may contain duplicate historical values, so the
+    deterministic newest-row rule keeps incident lookup useful without
+    silently turning a diagnostic migration into a data-cleanup operation.
+    Prefixes such as ``fm_corr_`` and ``lat_corr_`` have no semantics here.
+    """
+
+    row = conn.execute(
+        """SELECT * FROM mcp_call_observations
+           WHERE correlation_id = ?
+           ORDER BY created_at DESC, id DESC
+           LIMIT 1""",
+        (correlation_id,),
+    ).fetchone()
     if row is None:
         return None
     return _row_to_observation(row)

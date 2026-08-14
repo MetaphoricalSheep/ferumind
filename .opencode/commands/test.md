@@ -17,9 +17,5 @@
 5. Do **not** lower coverage thresholds without explicit user instruction.
 6. If coverage fails, add tests to cover the gap.
 
-## Verification
-
-- [ ] All tests pass
-- [ ] Coverage >= 80%
-- [ ] No tests weakened
-- [ ] Missing tests for new behavior added
+The floor is 80%. A green run that got there by deleting an assertion or
+lowering the threshold is a failed run.

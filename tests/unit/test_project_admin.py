@@ -56,6 +56,52 @@ def test_list_all_projects_empty_workspace_has_no_entries(
     assert list_all_projects(conn, workspace) == []
 
 
+def test_a_rejected_call_never_invents_a_project(
+    conn: sqlite3.Connection, workspace: WorkspaceRoot
+) -> None:
+    """The observation log records attempts, including ones that were refused.
+
+    A live workspace carried ``definitely-not-a-project`` in ``project list``
+    for a day because two ``PROJECT_NOT_FOUND`` probes had been logged against
+    that key. A rejected call is not evidence a project exists, and a phantom
+    entry is indistinguishable from a real project whose folder went missing.
+    """
+    from ferumind.core.observations import record_mcp_call_observation
+
+    record_mcp_call_observation(
+        conn,
+        tool_name="get_context",
+        project_key="definitely-not-a-project",
+        ok=False,
+        error_code="PROJECT_NOT_FOUND",
+    )
+
+    assert list_all_projects(conn, workspace) == []
+
+
+def test_delete_project_clears_derived_section_rows(
+    conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
+) -> None:
+    """``section_index`` is derived state; leaving it behind orphans its rows."""
+    import shutil
+
+    from ferumind.core.paths import contained_project_root
+
+    rebuild_index(conn, workspace, [project])
+    before = conn.execute(
+        "SELECT COUNT(*) FROM section_index WHERE project_key = ?", (project,)
+    ).fetchone()[0]
+    assert before > 0, "fixture must index at least one section"
+
+    shutil.rmtree(contained_project_root(workspace, project))
+    delete_project(conn, workspace, project)
+
+    after = conn.execute(
+        "SELECT COUNT(*) FROM section_index WHERE project_key = ?", (project,)
+    ).fetchone()[0]
+    assert after == 0
+
+
 def test_list_all_projects_excludes_workspace_operation_scope(
     conn: sqlite3.Connection, workspace: WorkspaceRoot
 ) -> None:

@@ -25,6 +25,7 @@ from ferumind.core.paths import (
     resolve_workspace_root,
 )
 from ferumind.core.registry import ProjectEntry, require_project
+from ferumind.core.runtime_events import try_record_internal_error
 from ferumind.db.database import Database
 from ferumind.mcp.models import make_error
 
@@ -34,6 +35,15 @@ _config: Config | None = None
 _format_gate: FormatGate | None = None
 _transport: str = "stdio"
 logger = logging.getLogger(__name__)
+
+
+def _safe_error_log(message: str, *args: object) -> None:
+    """Keep operator logging outside the user-visible tool result path."""
+
+    try:
+        logger.error(message, *args)
+    except Exception:  # Logging is observability and must not alter tool work.
+        return
 
 
 def init_tool_context(workspace_path: Path | None = None, *, transport: str = "stdio") -> None:
@@ -102,6 +112,18 @@ def current_transport() -> str:
     return _transport
 
 
+def record_internal_error(exc: BaseException, correlation_id: str) -> None:
+    """Best-effort durable diagnostic for a generic MCP internal error."""
+
+    try:
+        try_record_internal_error(require_workspace(), exc, correlation_id)
+    except Exception as diagnostic_exc:  # Runtime diagnostics never affect tools.
+        _safe_error_log(
+            "Failed to prepare an internal-error diagnostic (type=%s)",
+            type(diagnostic_exc).__name__,
+        )
+
+
 def scoped_project(project: str | None) -> ProjectEntry:
     """Validate the ``project`` assertion against the registry."""
     return require_project(require_workspace(), project)
@@ -117,9 +139,20 @@ def error_result(exc: Exception, *, project: str | None = None) -> CallToolResul
             "Path is outside the configured workspace boundary",
             project=project,
         )
-    logger.error("Unexpected tool error (type=%s)", type(exc).__name__)
+    # Local import avoids a module cycle: observation middleware depends on
+    # this context module for the process-wide database and workspace handles.
+    from ferumind.mcp.observation import current_correlation_id
+
+    correlation_id = current_correlation_id()
+    record_internal_error(exc, correlation_id)
+    _safe_error_log(
+        "Unexpected tool error (correlation_id=%s, type=%s)",
+        correlation_id,
+        type(exc).__name__,
+    )
     return make_error(
         "INTERNAL_ERROR",
         "Ferumind encountered an unexpected internal error",
+        {"correlation_id": correlation_id},
         project=project,
     )

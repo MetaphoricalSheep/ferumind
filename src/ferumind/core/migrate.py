@@ -1,19 +1,20 @@
 """Workspace format migration frame (product/spec-versioning.md §1.3).
 
 Migration of user Markdown is never implicit: ``ferumind migrate`` is the
-only entry point. The v2 build ships the frame with an **empty** migrator
-registry — the first real migrator arrives with the first v3-breaking
-change, and the standing rule (§1.4) guarantees it ships in the same change
-that breaks the format.
+only entry point. Ferumind ships the frame with an **empty** migrator
+registry. The first real migrator was audited and exercised as owner-authorized
+local one-shot tooling for the format 2 → 3 cutover, then removed before the
+permanent format-3 change landed.
 
 Flow: resolve the ``N → N+1`` migrator chain, create a full workspace
-tarball backup and a global snapshot, run each migrator, bump ``meta.yml``,
-trigger a full reindex, and write an operation-log entry per project.
+tarball backup and a global snapshot, run each migrator, rebuild the index,
+commit one operation-log entry per project, then publish ``meta.yml`` as the
+final step that re-enables writes.
 """
 
 from __future__ import annotations
 
-import json
+import logging
 import os
 import sqlite3
 import tarfile
@@ -22,10 +23,11 @@ from collections.abc import Callable
 from contextlib import ExitStack
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
-from ferumind.core.errors import FormatUnsupportedError
+from ferumind.core.errors import FormatUnsupportedError, MigrationPrerequisiteError
 from ferumind.core.file_io import atomic_write_text
 from ferumind.core.format import SUPPORTED_FORMAT, read_format, write_format_marker
 from ferumind.core.indexer import rebuild_index
@@ -45,13 +47,46 @@ from ferumind.core.snapshots import (
 )
 from ferumind.core.types import DbConnection
 
+logger = logging.getLogger(__name__)
+
 #: A migrator transforms the workspace tree in place from format N to N+1.
 type Migrator = Callable[[WorkspaceRoot], None]
 
-#: Registered migrators keyed by their source format (N → N+1).
-#: Deliberately empty in the v2 build; tests register fakes.
+#: A preflight validates a format's semantic prerequisites and returns the
+#: reasons the workspace is not ready — empty meaning ready. It must not
+#: write, and :func:`run_migration` invokes it under the workspace and every
+#: registered-project lock before the backup exists.
+type Preflight = Callable[[WorkspaceRoot], list[str]]
+
+#: Registered migrators keyed by their source format (N → N+1). Deliberately
+#: empty between format bumps; tests register fake steps against the frame.
 MIGRATORS: dict[int, Migrator] = {}
+
+#: Prerequisite validators keyed by the same source format. A step may have a
+#: migrator and no preflight; the reverse is meaningless and never consulted.
+PREFLIGHTS: dict[int, Preflight] = {}
+
 MIGRATION_FAILURE_MARKER = ".ferumind/MIGRATION_RECOVERY_REQUIRED.json"
+_MAX_RECOVERY_MARKER_BYTES = 64 * 1024
+
+
+class MigrationExecutionError(RuntimeError):
+    """A migration failed after backup and transformation semantics began."""
+
+
+class MigrationRecoveryState(BaseModel):
+    """Durable replay guard spanning transformation through marker publication."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    state: Literal["transforming", "audit_committed", "failed"]
+    from_format: int
+    to_format: int
+    backup_path: str
+    snapshot_id: str
+    started_at: str
+    failed_at: str | None = None
+    error_type: str | None = None
 
 
 class MigrationPlan(BaseModel):
@@ -80,15 +115,34 @@ def plan_migration(
 ) -> MigrationPlan:
     """Resolve the migrator chain or fail with a clear error."""
     recovery_marker = contained_path(workspace, MIGRATION_FAILURE_MARKER)
+    found = read_format(workspace)
     if recovery_marker.is_file():
-        raise FormatUnsupportedError(
-            "A previous workspace migration failed after making changes; "
-            "restore its recorded backup before retrying",
-            details={"recovery_marker": MIGRATION_FAILURE_MARKER},
+        recovery_state = _read_migration_recovery_state(recovery_marker)
+        completed_publication = (
+            recovery_state is not None
+            and recovery_state.state == "audit_committed"
+            and recovery_state.to_format == found
+        )
+        if not completed_publication:
+            raise FormatUnsupportedError(
+                "A previous workspace migration may have made changes; "
+                "restore its recorded backup before retrying",
+                details={"recovery_marker": MIGRATION_FAILURE_MARKER},
+            )
+        logger.warning(
+            "Ignoring a stale migration recovery marker after format %s was durably published",
+            found,
         )
     registry = MIGRATORS if migrators is None else migrators
-    found = read_format(workspace)
-    current = found if found is not None else 1
+    if found is None:
+        raise FormatUnsupportedError(
+            "No readable workspace format marker at system/meta.yml; there is "
+            "no starting format to migrate from. Initialize the workspace with "
+            "scripts/bootstrap_workspace.py, or point FERUMIND_WORKSPACE at an "
+            "existing workspace.",
+            details={"marker": "system/meta.yml", "target_format": target_format},
+        )
+    current = found
     if current == target_format:
         return MigrationPlan(from_format=current, to_format=target_format, steps=[])
     if current > target_format:
@@ -107,6 +161,170 @@ def plan_migration(
             raise FormatUnsupportedError(msg)
         steps.append(step)
     return MigrationPlan(from_format=current, to_format=target_format, steps=steps)
+
+
+def run_preflights(
+    workspace: WorkspaceRoot,
+    steps: list[int],
+    *,
+    preflights: dict[int, Preflight] | None = None,
+) -> None:
+    """Validate every step's semantic prerequisites, or refuse having done nothing.
+
+    This runs **before** :func:`create_backup_tarball`, before the durable
+    replay guard is armed, and before ``transform_started`` is set; that
+    placement is the whole point. Once transformation can begin, the guard
+    blocks every future migration until either backup recovery or proven final
+    publication. That is right for a tree that may be half-converted and badly
+    wrong for a workspace that simply is not ready yet: three missing
+    descriptions should be reported and cost nothing, not put the workspace
+    into recovery-required.
+
+    So a prerequisite failure here raises before any of that exists — no
+    backup, no snapshot, no marker, nothing on disk changed.
+    """
+    registry = PREFLIGHTS if preflights is None else preflights
+    failures: list[str] = []
+    for step in steps:
+        preflight = registry.get(step)
+        if preflight is None:
+            continue
+        failures.extend(preflight(workspace))
+    if failures:
+        shown = failures[:20]
+        detail = "; ".join(shown)
+        if len(failures) > len(shown):
+            detail += f"; and {len(failures) - len(shown)} more"
+        raise MigrationPrerequisiteError(
+            f"Workspace is not ready to migrate: {detail}",
+            details={"failure_count": len(failures)},
+        )
+
+
+def _project_roots_for_migration(workspace: WorkspaceRoot) -> dict[str, Path]:
+    """Resolve every registered project before trying to acquire any lock.
+
+    Project locks live inside project directories, so a missing or symlinked
+    registered directory cannot be locked. Treat that as a prerequisite
+    failure under the workspace lock, before backup or transformation, rather
+    than silently omitting the project from preflight and rebuild.
+    """
+    roots: dict[str, Path] = {}
+    failures: list[str] = []
+    for key in sorted(load_registry(workspace)):
+        try:
+            root = contained_project_root(workspace, key)
+        except PathSafetyError as exc:
+            failures.append(f"registered project {key!r} has an unsafe path ({exc})")
+            continue
+        if not root.is_dir():
+            failures.append(f"registered project {key!r} has no project directory")
+            continue
+        roots[key] = root
+    if failures:
+        raise MigrationPrerequisiteError(
+            f"Workspace is not ready to migrate: {'; '.join(failures)}",
+            details={"failure_count": len(failures)},
+        )
+    return roots
+
+
+def _raise_on_rebuild_errors(errors: int, messages: list[str]) -> None:
+    if errors == 0:
+        return
+    shown = messages[:20]
+    detail = "; ".join(shown)
+    if len(messages) > len(shown):
+        detail += f"; and {len(messages) - len(shown)} more"
+    raise MigrationExecutionError(
+        f"Migration index rebuild failed for {errors} document(s): {detail}"
+    )
+
+
+def _read_migration_recovery_state(marker: Path) -> MigrationRecoveryState | None:
+    """Read a bounded recovery marker; malformed state always fails closed."""
+    try:
+        if marker.stat().st_size > _MAX_RECOVERY_MARKER_BYTES:
+            return None
+        return MigrationRecoveryState.model_validate_json(marker.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, ValidationError, ValueError):
+        return None
+
+
+def _write_migration_recovery_state(
+    workspace: WorkspaceRoot,
+    state: MigrationRecoveryState,
+) -> None:
+    """Durably publish replay state or fail before transformation continues.
+
+    A readable replacement after a directory-fsync error is not enough: a
+    power loss may still discard that directory entry. Callers therefore
+    propagate every durability error. For the initial ``transforming`` state,
+    that guarantees the migrator never runs unless its replay guard is durable.
+    """
+    marker = contained_path(workspace, MIGRATION_FAILURE_MARKER)
+    atomic_write_text(marker, state.model_dump_json(indent=2) + "\n")
+
+
+def _fsync_directory(directory: Path) -> None:
+    """Make prior directory-entry changes durable."""
+    directory_fd = os.open(directory, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
+
+
+def _clear_completed_recovery_state(workspace: WorkspaceRoot) -> None:
+    """Remove the replay guard after format publication, with safe ambiguity.
+
+    Failure to remove the file cannot make a completed migration unsafe. Its
+    ``audit_committed`` state plus the target format tells
+    :func:`plan_migration` that publication completed, so a lingering marker
+    is ignored rather than replayed.
+    """
+    marker = contained_path(workspace, MIGRATION_FAILURE_MARKER)
+    try:
+        marker.unlink(missing_ok=True)
+        _fsync_directory(marker.parent)
+    except OSError as exc:
+        logger.warning(
+            "Could not durably clear completed migration recovery state "
+            "(type=%s); its committed phase remains safe",
+            type(exc).__name__,
+        )
+
+
+def _publish_format_marker(workspace: WorkspaceRoot, target_format: int) -> bool:
+    """Publish the final marker, resolving a post-replace fsync ambiguity.
+
+    ``atomic_write_text`` can replace the marker successfully and then report
+    a directory-fsync failure. At this point migration audit rows are already
+    committed. If the intended value is visible, retry the directory fsync.
+    Return ``False`` if durability remains uncertain so the caller retains the
+    durable ``audit_committed`` replay guard; a later power loss can then
+    restore the old format marker without making the migration replayable.
+    """
+    try:
+        write_format_marker(workspace, target_format)
+    except OSError:
+        if read_format(workspace) != target_format:
+            raise
+        try:
+            _fsync_directory(contained_path(workspace, "system"))
+        except OSError:
+            logger.warning(
+                "Format %s is visible but its directory entry could not be "
+                "proven durable; retaining the audit-committed replay guard",
+                target_format,
+            )
+            return False
+        logger.warning(
+            "Format marker publication reported failure after format %s became "
+            "visible; an explicit directory fsync proved it durable",
+            target_format,
+        )
+    return True
 
 
 def create_backup_tarball(
@@ -197,6 +415,7 @@ def run_migration(
     dry_run: bool = False,
     target_format: int = SUPPORTED_FORMAT,
     migrators: dict[int, Migrator] | None = None,
+    preflights: dict[int, Preflight] | None = None,
     backup_dir: Path | None = None,
 ) -> MigrationReport:
     """Run (or plan) an explicit workspace migration."""
@@ -217,14 +436,21 @@ def run_migration(
         )
         if not plan.steps:
             return MigrationReport(plan=plan, dry_run=False)
-        initial_project_keys = sorted(load_registry(workspace))
+        project_roots = _project_roots_for_migration(workspace)
         with ExitStack() as project_locks:
-            locked_keys: set[str] = set()
-            for key in initial_project_keys:
-                project_locks.enter_context(
-                    acquire_project_lock(contained_project_root(workspace, key), key)
+            for key, project_root in project_roots.items():
+                project_locks.enter_context(acquire_project_lock(project_root, key))
+
+            if sorted(load_registry(workspace)) != sorted(project_roots):
+                raise MigrationPrerequisiteError(
+                    "Workspace is not ready to migrate: the project registry changed "
+                    "while migration locks were being acquired"
                 )
-                locked_keys.add(key)
+
+            # The full prerequisite read now has the same exclusion boundary
+            # as the backup and transformation that follow it: one workspace
+            # lock plus every registered-project lock.
+            run_preflights(workspace, plan.steps, preflights=preflights)
 
             resolved_backup_dir = (
                 backup_dir
@@ -246,22 +472,33 @@ def run_migration(
                 after_files={},
             )
 
+            recovery_state = MigrationRecoveryState(
+                state="transforming",
+                from_format=plan.from_format,
+                to_format=plan.to_format,
+                backup_path=str(backup_path),
+                snapshot_id=snapshot_id,
+                started_at=datetime.now(UTC).isoformat(),
+            )
+            # Arm the replay guard durably before the first transformation.
+            # A process death from this point onward must require backup
+            # recovery instead of replaying an in-place migrator.
+            _write_migration_recovery_state(workspace, recovery_state)
+
             transform_started = False
             try:
                 transform_started = True
                 for step in plan.steps:
                     registry[step](workspace)
 
-                write_format_marker(workspace, plan.to_format)
-
                 project_keys = sorted(load_registry(workspace))
                 for key in project_keys:
-                    if key not in locked_keys:
-                        project_locks.enter_context(
-                            acquire_project_lock(contained_project_root(workspace, key), key)
-                        )
-                        locked_keys.add(key)
+                    if key not in project_roots:
+                        project_root = contained_project_root(workspace, key)
+                        project_locks.enter_context(acquire_project_lock(project_root, key))
+                        project_roots[key] = project_root
                 result = rebuild_index(conn, workspace, project_keys, locks_held=True)
+                _raise_on_rebuild_errors(result.errors, result.error_messages)
 
                 for key in project_keys:
                     record_operation(
@@ -287,21 +524,32 @@ def run_migration(
                     commit=False,
                 )
                 conn.commit()
+
+                # Distinguish a power loss before marker publication from one
+                # after it. Only this phase plus the target marker proves the
+                # migration completed and makes a lingering state file stale.
+                recovery_state = recovery_state.model_copy(update={"state": "audit_committed"})
+                _write_migration_recovery_state(workspace, recovery_state)
+
+                # The marker is the declaration that the cutover is complete
+                # and re-enables writes. Make it the final durable step: an
+                # audit-row or commit failure must leave the old marker in
+                # place even though transformation semantics have begun.
+                publication_durable = _publish_format_marker(workspace, plan.to_format)
+                if publication_durable:
+                    _clear_completed_recovery_state(workspace)
             except BaseException as exc:
                 conn.rollback()
                 if transform_started:
-                    failure_payload = {
-                        "from_format": plan.from_format,
-                        "to_format": plan.to_format,
-                        "backup_path": str(backup_path),
-                        "failed_at": datetime.now(UTC).isoformat(),
-                        "error_type": type(exc).__name__,
-                    }
+                    failed_state = recovery_state.model_copy(
+                        update={
+                            "state": "failed",
+                            "failed_at": datetime.now(UTC).isoformat(),
+                            "error_type": type(exc).__name__,
+                        }
+                    )
                     try:
-                        atomic_write_text(
-                            contained_path(workspace, MIGRATION_FAILURE_MARKER),
-                            json.dumps(failure_payload, indent=2) + "\n",
-                        )
+                        _write_migration_recovery_state(workspace, failed_state)
                     except OSError as marker_exc:
                         exc.add_note(
                             "Ferumind also failed to write the migration recovery marker "

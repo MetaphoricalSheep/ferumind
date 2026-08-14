@@ -63,6 +63,8 @@ class DocumentSection(StrictModel):
     start_line: int
     end_line: int
     content_sha256: str
+    #: UTF-8 byte size of the section text — a cheap read-cost hint.
+    size_bytes: int
 
 
 class DocumentBlock(StrictModel):
@@ -173,6 +175,7 @@ def derive_sections(lines: list[str], body_start: int, total_lines: int) -> list
     if first_heading_line > body_start:
         preamble_end = first_heading_line - 1
         if _range_has_text(lines, body_start, preamble_end):
+            content_sha256, size_bytes = _section_digest(lines, body_start, preamble_end)
             sections.append(
                 DocumentSection(
                     section_id=_unique_id("preamble", used_ids, next_suffixes),
@@ -182,7 +185,8 @@ def derive_sections(lines: list[str], body_start: int, total_lines: int) -> list
                     level=None,
                     start_line=body_start,
                     end_line=preamble_end,
-                    content_sha256=hash_line_range(lines, body_start, preamble_end),
+                    content_sha256=content_sha256,
+                    size_bytes=size_bytes,
                 )
             )
 
@@ -205,6 +209,7 @@ def derive_sections(lines: list[str], body_start: int, total_lines: int) -> list
         stack.append((level, text))
 
         end_line = end_lines[index]
+        content_sha256, size_bytes = _section_digest(lines, line_number, end_line)
 
         sections.append(
             DocumentSection(
@@ -215,10 +220,17 @@ def derive_sections(lines: list[str], body_start: int, total_lines: int) -> list
                 level=level,
                 start_line=line_number,
                 end_line=end_line,
-                content_sha256=hash_line_range(lines, line_number, end_line),
+                content_sha256=content_sha256,
+                size_bytes=size_bytes,
             )
         )
     return sections
+
+
+def _section_digest(lines: list[str], start_line: int, end_line: int) -> tuple[str, int]:
+    """Return ``(content_sha256, size_bytes)`` for lines ``start_line..end_line``."""
+    text = "\n".join(lines[start_line - 1 : end_line])
+    return compute_sha256(text), len(text.encode("utf-8"))
 
 
 def _range_has_text(lines: list[str], start_line: int, end_line: int) -> bool:
