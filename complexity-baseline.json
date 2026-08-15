@@ -8,7 +8,7 @@
     "PLR0913": 5,
     "PLR0915": 50
   },
-  "total": 86,
+  "total": 83,
   "entries": [
     {
       "rule": "C901",
@@ -132,14 +132,6 @@
     },
     {
       "rule": "C901",
-      "function": "render_image_context",
-      "count": 1,
-      "modules": [
-        "src/ferumind/core/renditions.py"
-      ]
-    },
-    {
-      "rule": "C901",
       "function": "restore_snapshot",
       "count": 1,
       "modules": [
@@ -224,14 +216,6 @@
       "count": 1,
       "modules": [
         "src/ferumind/core/remote_fetch.py"
-      ]
-    },
-    {
-      "rule": "PLR0912",
-      "function": "render_image_context",
-      "count": 1,
-      "modules": [
-        "src/ferumind/core/renditions.py"
       ]
     },
     {
@@ -688,14 +672,6 @@
       "count": 1,
       "modules": [
         "src/ferumind/mcp/read_tools.py"
-      ]
-    },
-    {
-      "rule": "PLR0915",
-      "function": "render_image_context",
-      "count": 1,
-      "modules": [
-        "src/ferumind/core/renditions.py"
       ]
     }
   ]

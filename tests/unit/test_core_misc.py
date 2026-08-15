@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -11,8 +12,13 @@ from pydantic import ValidationError as PydanticValidationError
 from ferumind.core.config import load_config
 from ferumind.core.documents import parse_document_content
 from ferumind.core.errors import ERROR_CODES, FerumindError, PatchConflictError
-from ferumind.core.file_io import atomic_write_text, ensure_private_directory
+from ferumind.core.file_io import (
+    atomic_write_text,
+    ensure_private_directory,
+    read_regular_file_bytes,
+)
 from ferumind.core.frontmatter import FrontmatterBehavior, generate_frontmatter
+from ferumind.core.paths import PathSafetyError
 from ferumind.core.policy import FROZEN_NOTE, POLICY_NOTES, policy_echo_for
 from ferumind.mcp.models import (
     apply_state_fields,
@@ -160,6 +166,90 @@ def test_atomic_write_never_widens_a_new_file(tmp_path: Path) -> None:
     atomic_write_text(target, "new\n")
 
     assert target.stat().st_mode & 0o777 == 0o600
+
+
+# ── S-06: validation and use must name the same object ──────────────────────
+#
+# `contained_path` refuses symlinks when it validates, then returns a Path
+# somebody opens later. These tests stand in for an attacker winning that
+# window: the symlink is planted *after* validation would have run, which is
+# the only arrangement the old code could not see.
+
+
+def test_reading_refuses_a_symlink_swapped_in_after_validation(tmp_path: Path) -> None:
+    outside = tmp_path / "outside.txt"
+    outside.write_text("secret\n", encoding="utf-8")
+    target = tmp_path / "inside.txt"
+    target.symlink_to(outside)
+
+    with pytest.raises(PathSafetyError):
+        read_regular_file_bytes(target)
+
+
+def test_reading_refuses_a_path_that_is_not_a_regular_file(tmp_path: Path) -> None:
+    """The check runs on fstat of the opened descriptor, not a stat of the name."""
+    directory = tmp_path / "a-directory"
+    directory.mkdir()
+
+    with pytest.raises((PathSafetyError, IsADirectoryError)):
+        read_regular_file_bytes(directory)
+
+
+def test_reading_a_plain_file_is_unchanged(tmp_path: Path) -> None:
+    target = tmp_path / "plain.txt"
+    target.write_bytes(b"payload\n")
+
+    assert read_regular_file_bytes(target) == b"payload\n"
+
+
+def test_atomic_write_follows_the_directory_it_opened_not_the_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A write finishes in the directory it opened, not one swapped in mid-flight.
+
+    The swap is performed *during* the write, at the first ``fsync`` — inside
+    the window between resolving the parent and renaming the payload into it,
+    which is the only place the race exists. A swap staged before the call is
+    not a race and passes against either implementation.
+
+    Path-based code loses this: it resolves the parent by name again at the
+    rename and lands the bytes in the attacker's directory. Because every step
+    here is relative to the descriptor, the bytes follow the original inode.
+    """
+    real = tmp_path / "real"
+    real.mkdir(mode=0o700)
+    decoy = tmp_path / "decoy"
+    decoy.mkdir(mode=0o700)
+
+    swapped = False
+    real_fsync = os.fsync
+
+    def swap_then_fsync(fd: int) -> None:
+        nonlocal swapped
+        if not swapped:
+            swapped = True
+            real.rename(tmp_path / "moved")
+            decoy.rename(tmp_path / "real")
+        real_fsync(fd)
+
+    monkeypatch.setattr(os, "fsync", swap_then_fsync)
+
+    atomic_write_text(real / "note.md", "payload\n")
+
+    assert swapped, "the race was never triggered; the test proves nothing"
+    assert (tmp_path / "moved" / "note.md").read_text(encoding="utf-8") == "payload\n"
+    assert not (tmp_path / "real" / "note.md").exists()
+
+
+def test_atomic_write_leaves_no_temporary_file_behind(tmp_path: Path) -> None:
+    """O_EXCL plus the unlink path must not litter on success or on failure."""
+    target = tmp_path / "note.md"
+    atomic_write_text(target, "first\n")
+    atomic_write_text(target, "second\n")
+
+    leftovers = [child.name for child in tmp_path.iterdir() if ".ferumind_tmp_" in child.name]
+    assert leftovers == []
 
 
 class TestPolicyEcho:

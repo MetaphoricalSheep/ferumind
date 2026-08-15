@@ -13,6 +13,7 @@ interprets image content.
 from __future__ import annotations
 
 import io
+from collections.abc import Callable
 from pathlib import Path
 from typing import Final
 
@@ -23,6 +24,7 @@ from ferumind.core.errors import (
     RenditionTooLargeError,
     ValidationError,
 )
+from ferumind.core.file_io import read_regular_file_bytes
 from ferumind.core.types import StrictModel
 
 #: Longest-edge bounds for a context rendition. 1024 px retains useful
@@ -187,13 +189,63 @@ def _best_jpeg_at_current_size(
     return best_data, best_quality
 
 
+def _encode_within_ceiling(
+    image: Image.Image,
+    ceiling: int,
+    encode: Callable[[Image.Image], tuple[bytes, int | None]],
+) -> tuple[bytes, int | None, bool]:
+    """Encode *image*, stepping its geometry down until the payload fits *ceiling*.
+
+    The PNG and JPEG paths differ only in how a single frame is encoded, so
+    the shrink loop belongs to neither of them.
+
+    The third element reports whether the *first* encode overflowed, which is
+    what makes a rendition ``size_limited``: a later pass fitting is the
+    adaptation working, not the absence of one.
+    """
+    data, quality = encode(image)
+    overflowed = len(data) > ceiling
+    while len(data) > ceiling:
+        current_edge = max(image.size)
+        if current_edge <= _MIN_ADAPTIVE_IMAGE_EDGE:
+            raise RenditionTooLargeError(
+                "Image rendition could not fit the context byte limit",
+                details={"limit_bytes": ceiling},
+            )
+        next_edge = _next_edge(current_edge, len(data), ceiling)
+        image.thumbnail((next_edge, next_edge), Image.Resampling.LANCZOS)
+        data, quality = encode(image)
+    return data, quality, overflowed
+
+
 def render_image_context(
     source: Path,
     *,
     max_edge: int = DEFAULT_IMAGE_EDGE,
     quality: int = DEFAULT_IMAGE_QUALITY,
 ) -> ImageRendition:
-    """Produce a bounded rendition of *source* for model context.
+    """Read *source* and render it — see :func:`render_image_bytes`.
+
+    A convenience wrapper for callers holding a path they trust. Anything
+    serving a project file should read the bytes once through
+    ``file_io.read_regular_file_bytes`` and call :func:`render_image_bytes`,
+    so the digest and the rendition are provably derived from the same read
+    rather than from two opens of the same name (S-06).
+    """
+    return render_image_bytes(
+        read_regular_file_bytes(source),
+        max_edge=max_edge,
+        quality=quality,
+    )
+
+
+def render_image_bytes(
+    data: bytes,
+    *,
+    max_edge: int = DEFAULT_IMAGE_EDGE,
+    quality: int = DEFAULT_IMAGE_QUALITY,
+) -> ImageRendition:
+    """Produce a bounded rendition of *data* for model context.
 
     Applies EXIF orientation, preserves aspect ratio, and never upscales.
     Images carrying transparency are re-encoded as PNG so the alpha channel
@@ -212,12 +264,13 @@ def render_image_context(
     """
     edge = clamp_edge(max_edge)
     encode_quality = clamp_quality(quality)
-    ceiling = rendition_ceiling(source.stat().st_size)
+    ceiling = rendition_ceiling(len(data))
 
     try:
-        # ``Image.open`` is lazy and the context manager owns the file
-        # handle; derived images below are in-memory and closed explicitly.
-        with Image.open(source) as image:
+        # Decoded from the bytes already in hand rather than reopened by name,
+        # so the rendition cannot describe a different file than the one the
+        # caller read and hashed. Derived images below are closed explicitly.
+        with Image.open(io.BytesIO(data)) as image:
             # Dimensions come from the header, so this rejects a
             # decompression bomb before any pixel data is decoded.
             if image.width * image.height > MAX_DECODED_PIXELS:
@@ -248,43 +301,22 @@ def render_image_context(
             encoded = working if working.mode == target_mode else working.convert(target_mode)
             try:
                 if use_png:
-                    data = _encode_png(encoded)
-                    size_limited = len(data) > ceiling
-                    while len(data) > ceiling:
-                        current_edge = max(encoded.size)
-                        if current_edge <= _MIN_ADAPTIVE_IMAGE_EDGE:
-                            raise RenditionTooLargeError(
-                                "Image rendition could not fit the context byte limit",
-                                details={"limit_bytes": ceiling},
-                            )
-                        next_edge = _next_edge(current_edge, len(data), ceiling)
-                        encoded.thumbnail(
-                            (next_edge, next_edge),
-                            Image.Resampling.LANCZOS,
-                        )
-                        data = _encode_png(encoded)
-                    mime_type = PNG_MIME_TYPE
-                    actual_quality = None
-                else:
-                    data, actual_quality = _best_jpeg_at_current_size(
-                        encoded, encode_quality, ceiling
+                    payload, actual_quality, overflowed = _encode_within_ceiling(
+                        encoded,
+                        ceiling,
+                        lambda image: (_encode_png(image), None),
                     )
-                    size_limited = len(data) > ceiling or actual_quality != encode_quality
-                    while len(data) > ceiling:
-                        current_edge = max(encoded.size)
-                        if current_edge <= _MIN_ADAPTIVE_IMAGE_EDGE:
-                            raise RenditionTooLargeError(
-                                "Image rendition could not fit the context byte limit",
-                                details={"limit_bytes": ceiling},
-                            )
-                        next_edge = _next_edge(current_edge, len(data), ceiling)
-                        encoded.thumbnail(
-                            (next_edge, next_edge),
-                            Image.Resampling.LANCZOS,
-                        )
-                        data, actual_quality = _best_jpeg_at_current_size(
-                            encoded, encode_quality, ceiling
-                        )
+                    size_limited = overflowed
+                    mime_type = PNG_MIME_TYPE
+                else:
+                    payload, actual_quality, overflowed = _encode_within_ceiling(
+                        encoded,
+                        ceiling,
+                        lambda image: _best_jpeg_at_current_size(image, encode_quality, ceiling),
+                    )
+                    # Equivalent to testing the first encode's quality: when
+                    # the loop ran at all, `overflowed` is already true.
+                    size_limited = overflowed or actual_quality != encode_quality
                     mime_type = JPEG_MIME_TYPE
                 width, height = encoded.size
             finally:
@@ -301,7 +333,7 @@ def render_image_context(
         ) from exc
 
     return ImageRendition(
-        data=data,
+        data=payload,
         mime_type=mime_type,
         width=width,
         height=height,

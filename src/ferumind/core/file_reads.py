@@ -26,6 +26,7 @@ from ferumind.core.errors import (
     RenditionTooLargeError,
     ValidationError,
 )
+from ferumind.core.file_io import read_regular_file_bytes
 from ferumind.core.file_uri import build_file_uri
 from ferumind.core.files import (
     ContextSupport,
@@ -45,7 +46,7 @@ from ferumind.core.renditions import (
     DEFAULT_IMAGE_EDGE,
     DEFAULT_IMAGE_QUALITY,
     ImageRendition,
-    render_image_context,
+    render_image_bytes,
 )
 from ferumind.core.types import StrictModel
 from ferumind.core.write_limits import MAX_UPLOAD_BYTES
@@ -69,10 +70,6 @@ MAX_TEXT_CONTEXT_SOURCE_BYTES: Final = 8 * 1024 * 1024
 MIN_TEXT_CHARS: Final = 1
 MAX_TEXT_CHARS_LIMIT: Final = 200_000
 DEFAULT_MAX_TEXT_CHARS: Final = 50_000
-
-#: Hashing streams in fixed blocks so a 20 MB original never doubles in
-#: memory just to produce a digest.
-_HASH_CHUNK_BYTES: Final = 1024 * 1024
 
 
 class ResolvedProjectFile(StrictModel):
@@ -180,12 +177,8 @@ def resolve_project_file(
 
 
 def file_sha256(target: Path) -> str:
-    """Stream a file's SHA-256 without holding the whole file in memory."""
-    digest = hashlib.sha256()
-    with target.open("rb") as stream:
-        while chunk := stream.read(_HASH_CHUNK_BYTES):
-            digest.update(chunk)
-    return digest.hexdigest()
+    """Return a file's SHA-256, read through the symlink-refusing open."""
+    return hashlib.sha256(read_regular_file_bytes(target)).hexdigest()
 
 
 def _slice_text(content: str, offset: int, max_chars: int) -> TextSlice:
@@ -210,22 +203,27 @@ def _slice_text(content: str, offset: int, max_chars: int) -> TextSlice:
 
 def _read_text_context(
     resolved: ResolvedProjectFile,
+    raw: bytes,
     *,
     text_offset: int,
     max_text_chars: int,
 ) -> tuple[TextSlice | None, str | None]:
-    """Decode and slice a text file, or explain why it stays resource-only."""
-    if resolved.size_bytes > MAX_TEXT_CONTEXT_SOURCE_BYTES:
+    """Decode and slice already-read text, or explain why it stays resource-only.
+
+    The bytes are passed in rather than reopened: the caller read them once
+    under the symlink-refusing open, and a second open by name could resolve
+    to a different file (S-06).
+    """
+    if len(raw) > MAX_TEXT_CONTEXT_SOURCE_BYTES:
         raise FileTooLargeError(
             f"{resolved.path} is too large to read as text context",
             details={
                 "path": resolved.path,
-                "size_bytes": resolved.size_bytes,
+                "size_bytes": len(raw),
                 "limit_bytes": MAX_TEXT_CONTEXT_SOURCE_BYTES,
                 "resource_uri": resolved.resource_uri,
             },
         )
-    raw = resolved.absolute.read_bytes()
     try:
         # Strict: a file whose MIME says text but whose bytes are not UTF-8
         # becomes resource_only rather than lossily-decoded mojibake.
@@ -264,12 +262,16 @@ def read_file_for_context(
     resolved = resolve_project_file(workspace, project_key, path)
     project_root = contained_project_root(workspace, project_key)
     sidecar = sidecar_for_path(project_root, path)
-    digest = file_sha256(resolved.absolute)
+    # One read serves the digest and every representation below it, so the
+    # hash provably describes the bytes that were rendered or sliced. Two
+    # opens of the same name are two different questions (S-06).
+    raw = read_regular_file_bytes(resolved.absolute)
+    digest = hashlib.sha256(raw).hexdigest()
 
     if resolved.context_support == "image":
         try:
-            rendition = render_image_context(
-                resolved.absolute,
+            rendition = render_image_bytes(
+                raw,
                 max_edge=max_image_edge,
                 quality=image_quality,
             )
@@ -295,6 +297,7 @@ def read_file_for_context(
     if resolved.context_support == "text":
         text_slice, reason = _read_text_context(
             resolved,
+            raw,
             text_offset=text_offset,
             max_text_chars=max_text_chars,
         )
@@ -384,7 +387,7 @@ def read_file_resource(
     """
     resolved = resolve_project_file(workspace, project_key, path)
     _assert_resource_is_deliverable(resolved.size_bytes, max_response_bytes)
-    raw = resolved.absolute.read_bytes()
+    raw = read_regular_file_bytes(resolved.absolute)
     if resolved.context_support == "text":
         try:
             return FileResourceContent(
