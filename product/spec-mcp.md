@@ -134,7 +134,7 @@ Response:
   "project": { "key": "garden", "title": "Garden", "status": "active" },
   "rules": {
     "content_markdown": "<workspace rules then project rules, concatenated, each file prefixed by an H2 header naming its source path>",
-    "sources": ["system/rules/00-contract.md", "projects/garden/rules/training.md"]
+    "sources": ["system/rules/00-contract.md", "projects/garden/rules/planting.md"]
   },
   "spine": {
     "path": "spine.md",

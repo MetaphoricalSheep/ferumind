@@ -15,18 +15,19 @@ behave like it's been on the project all along.
 
 Three scenes:
 
-1. **Working tempo.** You finish a garden and tell whatever chat is handy
-   "bench 3x8 at 20 kg". The agent gets its contract from the server and,
-   without being told, logs the session, preps the next one, updates the goal
-   estimate, and notes continuity in memory. Nothing re-explained.
-2. **Library tempo.** Two years on, the home-lab dies. Fresh chat, any
+1. **Working tempo.** You finish an hour in the garden and tell whatever chat
+   is handy "two rows of garlic in bed three". The agent gets its contract from
+   the server and, without being told, logs the session, preps the next one,
+   updates the rotation plan, and notes continuity in memory. Nothing
+   re-explained.
+2. **Library tempo.** Two years on, the media server dies. Fresh chat, any
    client: "walk me through the rebuild." The agent finds the runbook that was
    distilled from the actual working sessions — gotchas included, because they
    were captured when they happened.
-3. **Lifecycle.** A training phase ends. The agent distills what still matters
+3. **Lifecycle.** A growing season ends. The agent distills what still matters
    into memory and library, then archives the raw working doc. Search stays
-   clean, nothing is lost, and "what was my bench in July '26?" still has an
-   answer.
+   clean, nothing is lost, and "what went into bed three in July '26?" still
+   has an answer.
 
 Ferumind makes agents **resumable** and knowledge **cumulative** — across
 clients, chats, and years.
@@ -57,8 +58,8 @@ The working space (live collaboration: plans, logs, memory) and the library
 (durable reference: runbooks, playbooks, decisions) are one product, because
 working sessions are where library content gets made and the library is what
 makes working sessions smart. Known risk, stated honestly: the distillation
-flywheel has exactly one existence proof (the recipe library), and the
-home-lab project articulated the loop verbatim and still stalled at one
+flywheel has exactly one existence proof (a single reference library), and
+another project articulated the loop verbatim and still stalled at one
 catch-all file. Whether agent-nudged distillation actually happens is a thing
 dogfooding must show (see D10).
 
@@ -219,8 +220,9 @@ advance.
 ### D10 — Validation is dogfooding
 
 No formal gate, no lab experiment. The new layout and contract go live on the
-real projects (garden first) and get judged by use: do fresh chats follow the
-contract, honor `ask-human`, keep memory clean, without hand-holding? If
+real projects (the garden pilot first) and get judged by use: do fresh chats
+follow the contract, honor `ask-human`, keep memory clean, without
+hand-holding? If
 agents prove unreliable at honoring declared policy, the fallback is
 server-side enforcement (principle 1's escape hatch) — a change to make from
 evidence, not in advance.
@@ -331,15 +333,15 @@ migrations, search upgraded to FTS5, dead write-only tables dropped. Full detail
 
 ## Evidence, honestly weighted
 
-The design generalizes one user's observed usage: the garden project's agent
-independently built a spine, a private memory file, standing rules, gated
-plans, and a precedence model; research-notes invented the same split
-independently two weeks earlier; finance/home-lab/coursework are library-tempo
-with a source-of-truth index. That is **two sustained-collaboration projects,
-one user, convergent** — real signal, small n. It earns "this is the right
-default structure," not "this is a law of the medium." The home-lab
-project's stall (flywheel articulated, never executed) is the standing
-counterexample D1 and D10 must answer in use.
+The design generalizes one user's observed usage: a working-tempo project's
+agent independently built a spine, a private memory file, standing rules,
+gated plans, and a precedence model; a separate research project invented the
+same split independently two weeks earlier; three reference-heavy projects are
+library-tempo with a source-of-truth index. That is **two
+sustained-collaboration projects, one user, convergent** — real signal, small
+n. It earns "this is the right default structure," not "this is a law of the
+medium." The stalled project noted above (flywheel articulated, never
+executed) is the standing counterexample D1 and D10 must answer in use.
 
 ## Open
 

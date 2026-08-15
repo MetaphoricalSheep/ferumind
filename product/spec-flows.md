@@ -33,7 +33,7 @@ large). `find_in_document` for an exact string in a known document.
   disk; that's normal, not an error to escalate.
 - Stale/superseded proposals → `discard_patch`.
 
-## 3. Logging an entry ("bench 3x8 at 20 kg")
+## 3. Logging an entry ("two rows of garlic in bed three")
 
 1. Rules/spine direct A to the current log canvas
    (`canvases/garden-log-2026-07.md`, `edit_policy: append`).
