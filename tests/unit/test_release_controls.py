@@ -175,6 +175,67 @@ def test_verifier_and_ci_run_release_checks() -> None:
     assert "scripts/check_distribution.py" in workflow
 
 
+def _ci_jobs() -> dict[str, Any]:
+    workflow = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text())
+    return cast("dict[str, Any]", cast("dict[str, Any]", workflow)["jobs"])
+
+
+def test_ci_gate_requires_every_other_job() -> None:
+    """A job branch protection does not reach is a job that cannot block a merge.
+
+    ``ci-gate`` is the only required status check, so a new job that never
+    reaches its ``needs`` list runs, reports, and is ignored — green merges
+    while it fails. That is silent by construction, which is why it is pinned
+    here rather than left to review.
+    """
+    jobs = _ci_jobs()
+    required = cast("list[str]", jobs["ci-gate"]["needs"])
+    missing = sorted(set(jobs) - {"ci-gate"} - set(required))
+    assert not missing, (
+        f"ci.yml jobs {missing} are not in ci-gate's needs, so branch protection "
+        "ignores them. Add them to needs and to the echo block that reports results."
+    )
+
+
+def test_secret_scan_covers_all_history_without_leaking_findings() -> None:
+    """The three flags that decide whether the scan proves anything.
+
+    A shallow checkout makes ``--log-opts=--all`` scan one commit; a missing
+    ``--redact`` prints a real finding into an Actions log that goes public
+    with the repository. Both fail green, so neither is left to review.
+    """
+    secret_scan = _ci_jobs()["secret-scan"]
+    steps = cast("list[dict[str, Any]]", secret_scan["steps"])
+    checkout = next(
+        step for step in steps if str(step.get("uses", "")).startswith("actions/checkout")
+    )
+    assert checkout["with"]["fetch-depth"] == 0, "secret-scan must check out full history"
+
+    scan = "\n".join(str(step.get("run", "")) for step in steps)
+    assert "--log-opts='--all'" in scan, "secret-scan must cover every ref, not just HEAD"
+    assert "--redact" in scan, "secret-scan must not echo findings into a public log"
+    assert "sha256sum --check" in scan, "the gitleaks download must be checksum-verified"
+
+
+def test_gitleaks_allowlists_are_conjunctive() -> None:
+    """``condition = "AND"`` is the difference between a scoped waiver and a hole.
+
+    Gitleaks defaults an allowlist's criteria to OR, so a ``paths`` plus
+    ``regexes`` entry silences every match in that path *and* every match of
+    that regex repository-wide. The config reads identically either way.
+    """
+    config = tomllib.loads((REPO_ROOT / ".gitleaks.toml").read_text(encoding="utf-8"))
+    allowlists = cast("list[dict[str, Any]]", config.get("allowlists", []))
+    for allowlist in allowlists:
+        criteria = {"paths", "regexes", "commits", "stopwords"} & set(allowlist)
+        if len(criteria) > 1:
+            assert allowlist.get("condition") == "AND", (
+                f"allowlist {allowlist.get('description')!r} combines {sorted(criteria)} "
+                'without condition = "AND", so gitleaks ORs them into a wider waiver '
+                "than intended."
+            )
+
+
 # ── Python support range ────────────────────────────────────────────────────
 #
 # Six places declare a Python version and every one of them can drift

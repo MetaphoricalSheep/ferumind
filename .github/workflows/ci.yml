@@ -82,6 +82,53 @@ jobs:
           wheel="$(find dist -maxdepth 1 -type f -name '*.whl' -print -quit)"
           uv run --isolated --no-project --with "$wheel" ferumind --help
 
+  # ── Secret scan ───────────────────────────────────────────────────────────
+  #
+  # Runs the MIT-licensed gitleaks binary directly rather than
+  # gitleaks/gitleaks-action: that action ships under a commercial EULA as a
+  # bundled JavaScript blob, and this repository pins and reads what it runs.
+  # The release archive is checksum-verified, so a swapped or re-cut artifact
+  # fails the job instead of quietly scanning with someone else's binary.
+  #
+  # `fetch-depth: 0` is load-bearing. The default shallow checkout carries one
+  # commit, so `--log-opts=--all` would scan that commit and report green
+  # having proved nothing about history — which is exactly the surface a
+  # secret scan exists to cover.
+  #
+  # `--redact` is load-bearing too: without it a genuine finding is echoed
+  # into an Actions log that becomes public with the repository.
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      GITLEAKS_VERSION: "8.30.1"
+      GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+    steps:
+      - name: Check out every commit on every ref
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Install the pinned gitleaks release
+        run: |
+          set -euo pipefail
+          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl --fail --silent --show-error --location \
+            --output "$RUNNER_TEMP/$archive" \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+          echo "${GITLEAKS_SHA256}  $RUNNER_TEMP/$archive" | sha256sum --check --strict -
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" gitleaks
+
+      - name: Scan all history for secrets
+        run: |
+          "$RUNNER_TEMP/gitleaks" git \
+            --log-opts='--all' \
+            --config .gitleaks.toml \
+            --redact \
+            --no-banner \
+            .
+
   # ── MCP SDK compatibility matrix ──────────────────────────────────────────
   #
   # Ferumind reaches past the SDK's public API in two places (see
@@ -190,7 +237,7 @@ jobs:
   # counts a skipped required check as satisfied.
   ci-gate:
     if: always()
-    needs: [verify, resolve-mcp-matrix, mcp-sdk-matrix]
+    needs: [verify, secret-scan, resolve-mcp-matrix, mcp-sdk-matrix]
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -198,6 +245,7 @@ jobs:
         if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
         run: |
           echo "verify=${{ needs.verify.result }}"
+          echo "secret-scan=${{ needs.secret-scan.result }}"
           echo "resolve-mcp-matrix=${{ needs.resolve-mcp-matrix.result }}"
           echo "mcp-sdk-matrix=${{ needs.mcp-sdk-matrix.result }}"
           exit 1

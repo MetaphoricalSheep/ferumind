@@ -1,0 +1,37 @@
+# Secret-scanning configuration for `gitleaks git --log-opts='--all'`.
+#
+# The default ruleset is the point of running gitleaks at all — it carries
+# hundreds of provider-format and entropy rules that a hand-written grep does
+# not reproduce. This file extends it and never replaces it.
+#
+# Keep the allowlist empty unless a finding has been read and understood.
+# Every entry below is a documented false positive, scoped as narrowly as the
+# evidence allows: silencing a rule outright, or a whole file, would hide the
+# next real secret that lands in the same place.
+
+[extend]
+useDefault = true
+
+# `EXPECTED_SHA256` in the Basecoat provenance test pins the content hashes of
+# the three vendored stylesheets, so `just sync-basecoat` cannot swap in CSS
+# that was never reviewed. `generic-api-key` matches on shape rather than
+# meaning: a 64-character hex value on the right of `"tokens.css": "…"` reads
+# as a credential at entropy 3.87.
+#
+# Scoped to one rule, in one file, and only where the matched value is exactly
+# a lowercase SHA-256 digest. A real key in that same file still fails the
+# scan, because a real key is not 64 characters of hex.
+#
+# `condition = "AND"` is load-bearing and must not be dropped. Gitleaks
+# defaults an allowlist's criteria to OR, which would silence every
+# `generic-api-key` hit in that file AND every 64-hex value anywhere in the
+# repository — the second being a far wider hole than the finding it closes.
+# Verified both ways: an invented key planted in the file below is still
+# reported with AND, and is silently swallowed without it.
+[[allowlists]]
+description = "Vendored Basecoat stylesheet digests in the provenance test"
+condition = "AND"
+targetRules = ["generic-api-key"]
+paths = ['''tests/unit/test_basecoat_theme\.py''']
+regexTarget = "secret"
+regexes = ['''^[0-9a-f]{64}$''']
