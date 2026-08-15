@@ -113,11 +113,53 @@ The following are outside the current trust boundary:
   system account running Ferumind;
 - hostile multi-user sharing of one workspace;
 - arbitrary third-party agent/plugin code running as that account;
+- instructions embedded in content the operator did not write, acted on by a
+  connected agent (see below);
 - compromise of the host, Python runtime, dependency registry, relay, or LLM
   provider account.
 
 Project names are assertions, not per-project authorization capabilities.
 OAuth alone will therefore not make a multi-tenant Ferumind deployment safe.
+
+## Untrusted content and agent instructions
+
+Ferumind's documents carry the behavior; the server is a librarian. It
+protects, indexes, and assembles — it does not decide what an agent does.
+`edit_policy` reflects that: a proposal result echoes the target's policy and
+a note, and the server does not block on it. The closed list of hard refusals
+is archived targets, protected frontmatter identity keys, and out-of-project
+paths. Policy is not on that list.
+
+One consequence is worth stating plainly. A connected agent may create
+documents under `rules/`, and `get_context` concatenates every `rules/*.md`
+into the behavior text handed to that project's future sessions. So text that
+reaches an agent's context — an uploaded PDF, a fetched page, a document
+someone sent you, a search snippet — can induce a write whose instructions
+outlive the conversation that planted them.
+
+That persistence is the part specific to Ferumind. An agent acting on hostile
+text can already write anywhere in the project and send anything back over the
+same connection, within the turn it was given; a durable workspace lets the
+instruction survive the chat. Both are properties of handing an agent write
+access, not defects in the containment, hash, snapshot, and logging controls
+above, which apply to every write regardless of what motivated it.
+
+In practice:
+
+- Treat writes to `rules/` as privileged, and review them the way you would
+  review a change to a configuration file. `list_snapshots` and the operation
+  log show what changed and when.
+- `get_context` labels every rule with its source path
+  (`## projects/<key>/rules/<file>`), so an agent and a reader can both tell a
+  workspace rule from one added to a single project.
+- Content you did not write is untrusted input to your agent. It is not
+  untrusted input to Ferumind's own path, hash, and boundary checks, which do
+  not depend on agent cooperation.
+
+The server does not enforce `edit_policy` today, and this is a deliberate
+product decision rather than an oversight. Turning the policies into enforced
+mutation rules is tracked as an internet-exposure gate item, not a
+source-release one.
 
 ## Required gate before internet exposure
 

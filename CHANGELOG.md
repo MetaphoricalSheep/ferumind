@@ -8,16 +8,6 @@ Versioning, what a tag promises, and how a release is cut are documented in
 
 ## [Unreleased]
 
-### Changed
-
-- Uploads refuse more names and extensions. The extension denylist now covers
-  scriptable documents (`.svg`, `.html`), launchers (`.desktop`, `.url`),
-  Windows script hosts, macOS scripting, and mountable disk images. Filenames
-  carrying `:` (an NTFS alternate data stream), the characters Windows cannot
-  store, a trailing dot, or a reserved device name (`CON`, `NUL`, `COM1`…) are
-  rejected. A workspace is meant to be synced and browsed; these were live on
-  every filesystem but the one serving them.
-
 ## [0.1.0] - 2026-08-15
 
 First public source release. Ferumind is a local-first, Markdown-backed
