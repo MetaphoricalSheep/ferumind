@@ -19,7 +19,10 @@ EXPECTED_DIRECTORIES = [
     "tests/integration",
     "tests/fixtures",
     "docs",
-    "workspace",
+    # No "workspace": nothing under it is tracked, so a fresh clone does not
+    # have one until bootstrap creates it. Shipping a placeholder to keep the
+    # directory in the tree is what made bootstrap refuse to initialize a
+    # first-run checkout.
     ".githooks",
     "scripts",
     ".opencode/commands",

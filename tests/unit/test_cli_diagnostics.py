@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 import sqlite3
 from pathlib import Path
 from typing import cast
@@ -17,6 +18,21 @@ from ferumind.core.runtime_events import ObservationWriteFailedEvent, append_run
 from ferumind.core.types import JsonObject
 
 runner = CliRunner()
+
+_ANSI = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def _unstyled(text: str) -> str:
+    """Return *text* with ANSI style escapes removed.
+
+    ``typer.rich_utils`` forces terminal styling when ``GITHUB_ACTIONS``,
+    ``FORCE_COLOR``, or ``PY_COLORS`` is set, and reads them at import time,
+    so no fixture can switch it off. Styled help renders an option name as
+    two spans — ``\\x1b[1m-\\x1b[0m\\x1b[1m-workspace\\x1b[0m`` — and a bare
+    ``"--workspace" in result.output`` is then false on CI and true on a
+    developer machine. Strip the escapes instead of trying to prevent them.
+    """
+    return _ANSI.sub("", text)
 
 
 def _json_output(output: str) -> JsonObject:
@@ -166,12 +182,15 @@ def test_observation_help_places_shared_and_command_filters_consistently() -> No
     errors = runner.invoke(app, ["observations", "errors", "--help"])
 
     assert shared.exit_code == listed.exit_code == errors.exit_code == 0
+    shared_help = _unstyled(shared.output)
+    listed_help = _unstyled(listed.output)
+    errors_help = _unstyled(errors.output)
     for option in ("--workspace", "--project", "--tool", "--client"):
-        assert option in shared.output
+        assert option in shared_help
     for option in ("--since", "--until", "--failed", "--limit", "--json"):
-        assert option in listed.output
-    assert "--error-code" not in listed.output
-    assert "--error-code" in errors.output
+        assert option in listed_help
+    assert "--error-code" not in listed_help
+    assert "--error-code" in errors_help
 
 
 def test_observations_show_missing_returns_nonzero(workspace: WorkspaceRoot) -> None:
