@@ -14,8 +14,8 @@ treatments:
 |---|---|---|
 | Workspace format (folders, frontmatter contract, `system/` files) | `format:` in `workspace/system/meta.yml` | Explicit `ferumind migrate`, human-triggered, snapshot-protected |
 | DB schema | `PRAGMA user_version` + numbered migrations | Automatic at startup (system state, largely rebuildable) |
-| MCP tool surface / contract text | **Not wire-versioned** | Additive within a format version; breaking changes ride a format bump |
-| The package itself | semver in `pyproject.toml` | n/a — source checkout only today |
+| MCP tool surface / contract text | **Not wire-versioned** | Additive changes are free; renames and removals are breaking and ride a package version bump |
+| The package itself | semver in `pyproject.toml`, tagged `v<version>` | [docs/releases.md](../docs/releases.md) is the release process |
 
 ### 0.1 Naming the axes
 
@@ -28,13 +28,18 @@ Each axis gets one name, and the names are not interchangeable:
 - **`v`** is reserved for git release tags (`v0.2.0`) and appears nowhere
   else.
 
-**These numbers move independently and will never line up.** The workspace is
-at format 3 while the database is at schema 3 and the package is at 0.1.0;
-those two matching is a coincidence of history, not a relationship — they
-moved for unrelated reasons and will diverge again. Write the axis name
-whenever a number could be read as belonging to another one: "format 3", not
+**These numbers do not line up.** The workspace is at format 1 while the
+database is at schema 3 and the package is at 0.1.0. Write the axis name
+whenever a number could be read as belonging to another one: "format 1", not
 a bare version label. A label attached to no axis rots silently, because
 nothing checks it — so a guard in `tests/unit/test_release_controls.py` does.
+
+There is exactly one relationship between them, and it runs one way: **a
+format bump is always a breaking change, so it always forces a package
+version bump.** The reverse does not hold — a tool can be renamed, or a CLI
+flag removed, without the on-disk layout moving at all. The DB schema
+participates in neither direction: it is rebuildable system state that users
+never see, and it migrates automatically.
 
 The MCP surface needs no version negotiation because chats are disposable:
 there are no long-lived clients to break. The connector discovers tools at
@@ -53,15 +58,17 @@ removals only happen together with a format bump.
 
 ```yaml
 # Ferumind workspace metadata. Managed by Ferumind; do not edit by hand.
-format: 3
+format: 1
 created: "2026-07-12"
 ```
 
 - `format` is a positive integer. The current layout
-  ([spec-mcp.md](spec-mcp.md) §2) is format `3`; format 1 and format 2 layouts
-  both genuinely existed before it. Format 3 differs from format 2 in one
-  respect: `description` is a required frontmatter key on every managed
-  document (spec-mcp §3).
+  ([spec-mcp.md](spec-mcp.md) §2) is format `1`, and it is the **floor**:
+  nothing precedes it, so there is no workspace anywhere that needs migrating
+  into it. The layout churned during pre-public development and briefly
+  carried higher numbers; that was development finding its shape, not a
+  lifecycle, and no workspace but the author's ever held those layouts. The
+  axis starts counting at the first layout a stranger can hold.
 - A missing or unreadable marker means the format is **unknown**, not old.
   Ferumind never substitutes a number for it: an unmarked directory is an
   uninitialized workspace, and the remedy is to bootstrap it, not to migrate
@@ -91,17 +98,22 @@ to out-of-band edits like everything else):
   can actually run: `ferumind migrate` for an old workspace, upgrading the
   server for a new one, and bootstrapping for an unmarked directory — never
   `migrate` for the last, which has no starting format to migrate from.
-- Older markers do not close read entrypoints, so a semantically prepared
-  workspace remains inspectable while the human executes migration. This is
-  not a second legacy parser: an individual document that violates the current
-  managed-document contract still fails closed. Format 2 → 3 deliberately
-  prepared every description before the marker bump; the owner-authorized
-  one-workspace exception does not promise arbitrary unprepared format-2 trees
-  are readable by format-3 code. A newer-than-supported workspace is refused
-  entirely — an old server writing new-format files would corrupt silently.
-- `get_context` echoes the workspace marker in its payload block (`3` for a
-  current workspace, an older integer for an older marker, and `null` when
-  the marker is unreadable), when context assembly itself satisfies the
+- Older markers do not close read entrypoints, so an old workspace remains
+  inspectable while the human executes migration. This is not a second legacy
+  parser: an individual document that violates the current managed-document
+  contract still fails closed. Keeping reads open is a convenience for
+  inspection, not a promise that any older tree parses. A
+  newer-than-supported workspace is refused entirely — an old server writing
+  new-format files would corrupt silently.
+- At format 1 the `format < supported` row is unreachable from below: no
+  older marker exists to write. It is reached from the other side, by a build
+  newer than the workspace — which is exactly what a user has after upgrading
+  Ferumind and before running `ferumind migrate`. The tests express it that
+  way (`FormatGate(workspace, supported=SUPPORTED_FORMAT + 1)`) rather than
+  inventing a format 0.
+- `get_context` echoes the workspace marker in its payload block (`1` for a
+  current workspace, another integer for a non-matching marker, and `null`
+  when the marker is unreadable), when context assembly itself satisfies the
   current document parser. It never substitutes the build's
   supported format, so the workspace version remains truthful in transcripts
   and the observation log.
@@ -154,40 +166,39 @@ restore that backup before a retry; an in-place migrator is never replayed over
 a partially transformed workspace. Migration audit rows are committed as one
 SQLite transaction.
 
-**Ferumind shipped the frame, not a migration**: the marker, the
-`FORMAT_UNSUPPORTED` gate, the `migrate` command with an empty migrator
-registry, and its tests (fake `1→2` migrator in tests only). The first real
-migrator was written when the first format bump needed one — the `2 → 3`
-bump that made `description` required — and the standing rule below is what
-guaranteed migration was proven in the same work unit.
+**Ferumind ships the frame, and the registry is empty.** The marker, the
+`FORMAT_UNSUPPORTED` gate, the `migrate` command, and its tests (a synthetic
+`1 → 2` migrator in tests only) all exist; there is nothing registered to run,
+because format 1 is the floor and no workspace precedes it.
 
-That migrator was **local one-shot tooling and was never committed**. It was
-deleted once the owner's workspace was migrated, returning the registry to
-empty before the permanent format-3 change landed. Ferumind has one user and
-one workspace, so the spent `2 → 3` migrator can never run against another
-supported workspace; tracking it, even briefly, would create repository
-history for a code path that was never part of the product. Completion
-evidence records the verified format-2 backup and the one-shot execution, not
-a migrator commit SHA. Restoring that backup therefore also means deliberately
-recreating and re-auditing the migration step; that recovery tradeoff is an
-explicit owner decision. The **frame** stays: registry, preflights,
-`plan_migration`, `create_backup_tarball`, `run_migration`, the recovery
-marker, and the CLI command are product machinery for the next bump, and they
-are not what gets deleted.
+That is the steady state until the first format bump, and it is not a gap.
+The frame is the machinery that makes the first bump safe: registry,
+preflights, `plan_migration`, `create_backup_tarball`, `run_migration`, the
+recovery marker, and the CLI command. It is built and tested ahead of the
+need precisely so that the change which needs it does not also have to invent
+it.
 
 ### 1.4 The format-bump rule (why there is never another rebuild)
 
-> **A breaking workspace change is not done until migration is proven in the
-> same migration work unit.** Amendments accumulate in `product/` as they
-> emerge (the existing pattern); when a change breaks layout, frontmatter, or
-> contract semantics, the work that lands it must include the format bump,
-> tested `N → N+1` migration, updated contract files, successful live cutover,
-> and a `just sync-agents` pass. A migrator normally ships with the breaking
-> change. The explicit single-owner/single-workspace exception used for format
-> 2 → 3 may instead be audited, tested, executed, evidenced, and deleted as
-> untracked one-shot tooling before landing. Additive changes (new optional
-> frontmatter key, new tool, new folder that old servers simply ignore) do
-> **not** bump the format.
+> **A format bump is not done until its migration is proven in the same
+> change.** When a change breaks layout, frontmatter, or contract semantics,
+> the work that lands it must include the format bump, a registered and tested
+> `N → N+1` migrator, synthetic fixtures for the origin format, updated
+> contract files, and a `just sync-agents` pass. Additive changes (new
+> optional frontmatter key, new tool, new folder that old servers simply
+> ignore) do **not** bump the format.
+
+**There is no exception, and the one that existed is spent.** Before the
+source was public there was exactly one workspace, so a bump could be handled
+by one-shot tooling that was tested, run once, and deleted without ever being
+committed. That was defensible only because the entire population of affected
+workspaces was the author's own. Publishing the source ends it: from format 1
+onward, someone else holds a workspace, the migrator is the only thing
+standing between them and a stranded tree, and it ships.
+
+A format bump is also always a **breaking** package change — see
+[docs/releases.md](../docs/releases.md) for what that does to the version
+number.
 
 ## 2. The SQLite layer
 

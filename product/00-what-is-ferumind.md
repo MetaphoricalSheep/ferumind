@@ -310,9 +310,9 @@ all.
 
 Decided 12 Jul, so the next format never needs a rebuild. The workspace
 format (folders, frontmatter contract, `system/` files) carries an
-explicit version — currently `format: 3` in `workspace/system/meta.yml`, at
-whole-workspace granularity. The marker was introduced at format 2; format 3
-made document descriptions mandatory. The
+explicit version — currently `format: 1` in `workspace/system/meta.yml`, at
+whole-workspace granularity. Format 1 is the floor: it is the first layout
+published to anyone, and nothing precedes it to migrate from. The
 server supports exactly one document contract: older markers keep read
 entrypoints open for semantically prepared documents, while writes refuse
 with `FORMAT_UNSUPPORTED` until a human runs `ferumind migrate`
@@ -321,11 +321,10 @@ parser; an unprepared document that violates the current contract fails
 closed. The MCP surface is not
 wire-versioned — chats are disposable, so there are no long-lived clients to
 break: tools stay stable and additive within a format, `get_context`
-re-teaches every fresh chat, and breaking tool changes ride a format bump.
-The standing rule: **a breaking workspace change is not done until migration
-is tested and proven in the same work unit.** Migrators normally ship; an
-explicit single-owner/single-workspace decision may instead authorize audited,
-untracked one-shot tooling that is executed and deleted before landing. SQLite
+re-teaches every fresh chat, and breaking tool changes ride a package version
+bump. The standing rule: **a format bump is not done until its migration is
+tested and proven in the same change.** The migrator ships, every time —
+the single-workspace exception that predated publication is spent. SQLite
 stays (right engine, was just under-finished): schema versioned by numbered
 migrations, search upgraded to FTS5, dead write-only tables dropped. Full detail in
 [spec-versioning.md](spec-versioning.md).

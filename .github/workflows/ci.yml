@@ -175,3 +175,29 @@ jobs:
             tests/unit/test_call_observation_middleware.py \
             tests/integration/test_file_surface.py \
             -q
+
+  # ── The single required status check ──────────────────────────────────────
+  #
+  # Branch protection names checks as strings, and two of the jobs above
+  # render theirs from a matrix: `verify (3.12)` moves when the Python range
+  # does, and `mcp-sdk-matrix (2.0.0)` is resolved at run time, so requiring
+  # it directly either stops being required when the SDK moves or blocks every
+  # merge on a job that will never report. This job's name is static, so the
+  # ruleset requires exactly this one and the matrices stay free to change.
+  #
+  # `if: always()` plus the explicit `skipped` check is load-bearing: a needs
+  # job is SKIPPED rather than failed when a dependency fails, and GitHub
+  # counts a skipped required check as satisfied.
+  ci-gate:
+    if: always()
+    needs: [verify, resolve-mcp-matrix, mcp-sdk-matrix]
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fail unless every required job succeeded
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'skipped')
+        run: |
+          echo "verify=${{ needs.verify.result }}"
+          echo "resolve-mcp-matrix=${{ needs.resolve-mcp-matrix.result }}"
+          echo "mcp-sdk-matrix=${{ needs.mcp-sdk-matrix.result }}"
+          exit 1

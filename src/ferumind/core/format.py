@@ -1,8 +1,9 @@
 """Workspace format version marker and gate (product/spec-versioning.md §1).
 
-The workspace format lives in ``workspace/system/meta.yml`` (``format: 3``,
-whole-workspace granularity). Format 3 requires a ``description`` on every
-managed document. The server supports exactly one format:
+The workspace format lives in ``workspace/system/meta.yml`` (``format: 1``,
+whole-workspace granularity). Format 1 is the first published layout and the
+floor: there is nothing before it to migrate from. The server supports
+exactly one format:
 
 - format == supported → reads and writes normal
 - format < supported (or marker missing) → reads allowed, writes refused
@@ -28,7 +29,7 @@ from ferumind.core.file_io import atomic_write_text
 from ferumind.core.paths import WorkspaceRoot, contained_path
 from ferumind.core.yaml_safe import safe_load_yaml
 
-SUPPORTED_FORMAT: Final = 3
+SUPPORTED_FORMAT: Final = 1
 
 _META_HEADER: Final = "# Ferumind workspace metadata. Managed by Ferumind; do not edit by hand.\n"
 MAX_FORMAT_MARKER_BYTES: Final = 16 * 1024

@@ -400,7 +400,7 @@ class TestCompactTools:
     def test_compact_write_refuses_unsupported_format(
         self, tools: ToolMap, workspace: WorkspaceRoot
     ) -> None:
-        write_format_marker(workspace, 1)
+        write_format_marker(workspace, SUPPORTED_FORMAT + 1)
 
         envelope = call(tools, "create_compact_draft")
 
@@ -1480,7 +1480,7 @@ class TestRecordEpisodeTool:
     def test_the_write_is_refused_on_a_mismatched_workspace_format(
         self, tools: ToolMap, demo: str, workspace: WorkspaceRoot
     ) -> None:
-        write_format_marker(workspace, 1)
+        write_format_marker(workspace, SUPPORTED_FORMAT + 1)
         envelope = call(tools, "record_episode", project=demo, title="t", summary="s")
         assert envelope["error_code"] == "FORMAT_UNSUPPORTED"
         assert not (Path(workspace) / "projects" / demo / "memory" / "episodes").exists()
@@ -1488,12 +1488,31 @@ class TestRecordEpisodeTool:
 
 class TestFormatGate:
     def test_old_format_reads_ok_writes_refused(
-        self, tools: ToolMap, demo: str, workspace: WorkspaceRoot
+        self,
+        tools: ToolMap,
+        demo: str,
+        workspace: WorkspaceRoot,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        write_format_marker(workspace, SUPPORTED_FORMAT - 1)
+        """An older workspace stays readable while writes fail closed.
+
+        Format 1 is the floor, so there is no older marker to write —
+        ``SUPPORTED_FORMAT - 1`` would be 0, which is not a format. The same
+        relation is expressed from the other side instead: the marker stays
+        current and the *build* is advanced, which is exactly the state a user
+        reaches by upgrading Ferumind before running ``ferumind migrate``.
+        """
+        from ferumind.core.format import FormatGate
+        from ferumind.mcp import tool_context
+
+        monkeypatch.setattr(
+            tool_context,
+            "_format_gate",
+            FormatGate(workspace, supported=SUPPORTED_FORMAT + 1),
+        )
         read = call(tools, "get_context", project=demo)
         assert read["ok"] is True
-        assert read["data"]["payload"]["format"] == SUPPORTED_FORMAT - 1
+        assert read["data"]["payload"]["format"] == SUPPORTED_FORMAT
         write = call(
             tools,
             "propose_exact_replace_patch",

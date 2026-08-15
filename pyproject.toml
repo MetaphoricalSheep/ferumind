@@ -16,7 +16,7 @@ license = "MIT"
 license-files = ["LICENSE"]
 keywords = ["mcp", "markdown", "knowledge-management", "ai-agents", "local-first"]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "License :: OSI Approved :: MIT License",
   "Operating System :: POSIX :: Linux",
   "Programming Language :: Python :: 3",

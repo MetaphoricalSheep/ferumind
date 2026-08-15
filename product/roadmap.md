@@ -26,8 +26,8 @@ nowhere in the code. Superseded implementation details are not retained.
 ## Phase 1 — Layout, frontmatter, contract
 
 - New workspace layout + folder-derived roles in core (paths, templates,
-  `bootstrap_workspace.py` installs [contract/](contract/) and originally
-  wrote `system/meta.yml` at format 2; the current contract is format 3).
+  `bootstrap_workspace.py` installs [contract/](contract/) and writes
+  `system/meta.yml` at format 1, the published floor).
 - Format gate in core: `FORMAT_UNSUPPORTED` on writes when the marker
   mismatches; `ferumind migrate` CLI frame with empty migrator registry
   (spec-versioning §1).
@@ -77,8 +77,7 @@ nowhere in the code. Superseded implementation details are not retained.
   onboarding), headless agents, embeddings search (only if dogfood shows
   FTS5 retrieval falling short — spec-versioning §2.3).
 
-Standing rule from spec-versioning §1.4, all phases: a breaking workspace
-change is not done until its `N → N+1` migration is tested and proven in the
-same migration work unit. Migrators normally ship; the explicit
-single-owner/single-workspace exception may be executed and deleted as
-untracked one-shot tooling before landing.
+Standing rule from spec-versioning §1.4, all phases: a format bump is not
+done until its `N → N+1` migration is tested and proven in the same change.
+The migrator, its fixtures, and its tests ship with the bump. There is no
+exception.

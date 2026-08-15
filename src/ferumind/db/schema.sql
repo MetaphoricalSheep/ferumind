@@ -19,7 +19,7 @@ PRAGMA busy_timeout = 5000;
 
 -- ── Derived index ────────────────────────────────────────────────────────────
 
--- description is the format-3 navigation summary served beside size_bytes.
+-- description is the format-1 navigation summary served beside size_bytes.
 -- It is empty only for Markdown without managed-document identity frontmatter.
 -- Keep the column immediately before the table constraint: SQLite places an
 -- ALTER TABLE ADD COLUMN there, so fresh and migrated table DDL converge.

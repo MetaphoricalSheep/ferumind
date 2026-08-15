@@ -13,7 +13,6 @@ import sys
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import BinaryIO, Literal, TextIO
 
@@ -38,6 +37,7 @@ from ferumind.core.runtime_events import (
     exception_type_name,
     try_append_runtime_event,
 )
+from ferumind.core.version import package_version
 from ferumind.mcp.compact_tools import register_compact_tools
 from ferumind.mcp.document_tools import register_document_tools
 from ferumind.mcp.file_tools import register_file_tools
@@ -99,14 +99,10 @@ def _package_version() -> str:
     reported ``pkg_version("mcp")`` instead — so Ferumind used to advertise the
     *SDK's* version as its own, and the number moved on every SDK upgrade.
 
-    This reports what ``pyproject.toml`` declares. It is an identity string,
-    not a compatibility promise: the support boundary is source-checkout only
-    against a pinned commit.
+    Delegates to ``core.version`` so the CLI and this block cannot report
+    different numbers.
     """
-    try:
-        return version("ferumind")
-    except PackageNotFoundError:  # pragma: no cover - only when run un-installed
-        return "0+unknown"
+    return package_version()
 
 
 # ``version`` and ``middleware`` are public constructor parameters on mcp 2.x.

@@ -14,7 +14,7 @@ your machine to ChatGPT, so the workspace is reachable from the chat you are
 already in, with no inbound port and no public hostname. Local clients like
 Claude Code and Cursor connect over stdio.
 
-**Alpha**, distributed as a source checkout, on Python 3.12-3.14. The product
+**Beta**, distributed as a source checkout, on Python 3.12-3.14. The product
 contract is in [`product/`](product/00-what-is-ferumind.md); where code and
 [`product/spec-mcp.md`](product/spec-mcp.md) disagree, the spec wins.
 
@@ -154,15 +154,34 @@ subject-to-workspace authorization, and the deployment review in
 [SECURITY.md](SECURITY.md), which also holds the threat model and the reporting
 process.
 
-`main` moves and is not a stable branch, the Python API is private, and there
-is no supported wheel, PyPI package, or container image. Pin an exact commit if
-you need repeatability.
-
 The public-tree release check is a necessary current-tree control, not approval
 to publish by itself: it classifies tracked paths but does not inspect file
 contents or Git history. Review both for secrets before making a repository
 public. Live workspace content, databases, environment files, and generated
 agent configurations are Git-ignored.
+
+## Versioning
+
+Ferumind is `0.MINOR.PATCH`. **Pin a tag** — tags mark smoke-tested commits and
+never move once pushed:
+
+```bash
+git checkout v0.1.0
+```
+
+`main` moves. It is always green, but it is the integration line, not a
+release.
+
+The version number promises one thing: **a breaking change bumps the minor.**
+`0.3.1` → `0.3.4` will not break you; `0.4.0` might, so read the
+[changelog](CHANGELOG.md) first. Nothing enforces that for you in Python —
+write `ferumind>=0.3,<0.4` yourself.
+
+It does not promise backports, a deprecation window, a supported release
+channel, or a wheel, PyPI package, or container image. The Python import API
+is private and unversioned; use the MCP server or the CLI.
+[docs/releases.md](docs/releases.md) has the detail, including exactly which
+surfaces are covered.
 
 ## How it works
 
@@ -209,6 +228,7 @@ just verify    # format, lint, strict Pyright, tests, coverage floor
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md),
+[docs/releases.md](docs/releases.md),
 [docs/python-support.md](docs/python-support.md), and
 [docs/mcp-sdk-support.md](docs/mcp-sdk-support.md).
 

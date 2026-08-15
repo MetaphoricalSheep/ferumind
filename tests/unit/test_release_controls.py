@@ -402,3 +402,79 @@ def test_bare_version_label_guard_catches_injected_drift(tmp_path: Path) -> None
         "spec.md:1: bare version label 'v2'",
         "core.py:1: bare version label 'v2'",
     )
+
+
+# ── Versioning and release scheme ───────────────────────────────────────────
+#
+# The scheme is stated in four places — pyproject.toml, CHANGELOG.md,
+# README.md, and AGENTS.md — because each has a different reader. Four copies
+# of a rule drift, so the ones that can be compared mechanically are.
+# docs/releases.md is the human source of truth. See REL-038.
+
+#: ``0.MINOR.PATCH``. Going to 1.0.0 means deleting this guard, which is the
+#: point: it is a promise about backports, deprecation, and support windows
+#: that REL-003 has parked, not a number bump.
+_PRE_ONE_ZERO = re.compile(r"^0\.\d+\.\d+$")
+
+#: ``## [0.1.0] - 2026-08-15``. Keep a Changelog's released-section heading.
+_CHANGELOG_RELEASE = re.compile(r"^## \[(\d+\.\d+\.\d+)\] - \d{4}-\d{2}-\d{2}$", re.MULTILINE)
+
+
+def _project_version() -> str:
+    project = cast("dict[str, object]", _pyproject()["project"])
+    return cast("str", project["version"])
+
+
+def test_package_version_is_pre_one_zero() -> None:
+    version = _project_version()
+    assert _PRE_ONE_ZERO.match(version), (
+        f"version {version!r} must be 0.MINOR.PATCH. Shipping 1.0.0 makes the "
+        "semantic-version promise REL-003 parked; see docs/releases.md."
+    )
+
+
+def test_changelog_newest_release_matches_the_package_version() -> None:
+    """A tag, a version, and a changelog entry are one release or a lie."""
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    releases = _CHANGELOG_RELEASE.findall(changelog)
+    assert releases, "CHANGELOG.md carries no released section"
+    assert releases[0] == _project_version(), (
+        f"CHANGELOG.md's newest release is {releases[0]!r} but pyproject.toml "
+        f"declares {_project_version()!r}. Cutting a release moves both."
+    )
+
+
+def test_changelog_has_an_unreleased_section() -> None:
+    """Pull requests write here; without it they have nowhere to land."""
+    changelog = (REPO_ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
+    assert "## [Unreleased]" in changelog
+
+
+def test_versioning_docs_agree_that_the_python_api_is_unversioned() -> None:
+    """The claim most likely to drift into an accidental promise.
+
+    Everything else Ferumind versions is a surface a user touches deliberately.
+    ``import ferumind`` is the one that looks like a public API, is not one,
+    and would silently become a compatibility obligation if a document forgot
+    to say so.
+    """
+    for name in ("README.md", "docs/releases.md", "AGENTS.md"):
+        # Normalized: the phrase wraps across lines in every one of them.
+        text = " ".join((REPO_ROOT / name).read_text(encoding="utf-8").split())
+        assert "import API is private" in text, (
+            f"{name} must state that the Python import API is private and "
+            "unversioned. Without it the version number reads as covering it."
+        )
+
+
+def test_readme_versioning_states_what_it_does_not_promise() -> None:
+    """One promise, and an explicit list of the things it is not.
+
+    Asserts the disclaimer rather than hunting for promise-shaped phrasing:
+    a rewrite that drops the limits is the failure worth catching, and a
+    keyword blocklist cannot tell a promise from its own negation.
+    """
+    readme = " ".join((REPO_ROOT / "README.md").read_text(encoding="utf-8").split())
+    assert "does not promise" in readme, "README must state the limits of the version promise"
+    for limit in ("backports", "deprecation window"):
+        assert limit in readme, f"README must name {limit!r} among what is not promised"

@@ -43,8 +43,36 @@ app.command("doctor")(doctor_command)
 app.command("dashboard")(dashboard_command)
 
 
+def _print_version(value: bool) -> None:
+    """Print the version and exit, before any command or config work runs.
+
+    Eager because ``--version`` must answer on a machine with no workspace and
+    no configuration; deferring it to a command would make the answer depend
+    on state that has nothing to do with the question.
+    """
+    if not value:
+        return
+    from ferumind.core.version import package_version
+
+    typer.echo(package_version())
+    raise typer.Exit
+
+
 @app.callback()
-def _configure(ctx: typer.Context) -> None:
+def _configure(
+    ctx: typer.Context,
+    # Never read: the eager callback prints and exits before the body runs.
+    # It exists so Typer registers the option on the root command.
+    _version: Annotated[
+        bool,
+        typer.Option(
+            "--version",
+            help="Show the Ferumind version and exit.",
+            callback=_print_version,
+            is_eager=True,
+        ),
+    ] = False,
+) -> None:
     """Apply FERUMIND_LOG_LEVEL before any command runs.
 
     Runs once per invocation, ahead of every subcommand. Logging goes to
@@ -160,8 +188,10 @@ def info(
     from ferumind.core.format import SUPPORTED_FORMAT, read_format
     from ferumind.core.paths import WorkspaceRoot
     from ferumind.core.registry import list_entries
+    from ferumind.core.version import package_version
 
     resolved = _workspace_root(workspace)
+    typer.echo(f"Ferumind: {package_version()}")
     typer.echo(f"Workspace: {resolved}")
     typer.echo(f"Supported format: {SUPPORTED_FORMAT}")
     if resolved.is_dir():
