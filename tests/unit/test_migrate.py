@@ -12,7 +12,7 @@ import pytest
 
 from ferumind.core import migrate as migrate_module
 from ferumind.core.errors import FormatUnsupportedError, MigrationPrerequisiteError
-from ferumind.core.format import read_format, write_format_marker
+from ferumind.core.format import SUPPORTED_FORMAT, read_format, write_format_marker
 from ferumind.core.indexer import IndexResult
 from ferumind.core.migrate import MIGRATORS, PREFLIGHTS, plan_migration, run_migration
 from ferumind.core.operations import list_operations
@@ -27,28 +27,25 @@ def test_migration_registries_are_empty_between_format_bumps() -> None:
 def test_plan_noop_when_already_current(workspace: WorkspaceRoot) -> None:
     plan = plan_migration(workspace)
     assert plan.steps == []
-    assert plan.from_format == plan.to_format == 3
+    assert plan.from_format == plan.to_format == SUPPORTED_FORMAT
 
 
 def test_plan_fails_without_a_migrator_path(workspace: WorkspaceRoot) -> None:
+    """Format 1 is the floor, so the gap is proved against a synthetic target.
+
+    ``target_format`` is explicit rather than defaulted because there is no
+    format below the supported one to migrate *from* — the reachable failure
+    is a bump whose migrator was never registered.
+    """
     write_format_marker(workspace, 1)
-    with pytest.raises(FormatUnsupportedError, match="No migrator registered"):
-        plan_migration(workspace, migrators={})
-
-
-def test_spent_format_2_migrator_is_not_retained(workspace: WorkspaceRoot) -> None:
-    write_format_marker(workspace, 2)
-    with pytest.raises(
-        FormatUnsupportedError,
-        match="No migrator registered for format 2 → 3",
-    ):
-        plan_migration(workspace)
+    with pytest.raises(FormatUnsupportedError, match="No migrator registered for format 1 → 2"):
+        plan_migration(workspace, target_format=2, migrators={})
 
 
 def test_plan_refuses_downgrade(workspace: WorkspaceRoot) -> None:
-    write_format_marker(workspace, 3)
+    write_format_marker(workspace, 2)
     with pytest.raises(FormatUnsupportedError, match="newer"):
-        plan_migration(workspace, target_format=2, migrators={})
+        plan_migration(workspace, target_format=1, migrators={})
 
 
 def test_missing_marker_refuses_to_invent_a_starting_format(workspace: WorkspaceRoot) -> None:

@@ -1,4 +1,4 @@
-"""Markdown document parsing and modeling for the format 3 layout."""
+"""Markdown document parsing and modeling for the format 1 layout."""
 
 from __future__ import annotations
 

@@ -11,7 +11,7 @@ rollback, and SQLite-backed indexing/search/operation logs.
 
 ## Product status
 
-Ferumind is alpha software. The locked product design lives in
+Ferumind is beta software. The locked product design lives in
 `product/` ([00-what-is-ferumind.md](product/00-what-is-ferumind.md) and the
 specs beside it); where existing code conflicts with
 [product/spec-mcp.md](product/spec-mcp.md), **the spec wins**.
@@ -21,11 +21,12 @@ The current implementation was rebuilt from the specs in
 are not part of the repository. The package is at 0.1.0 and has never shipped
 a 1.0.
 
-Three version numbers move independently and never line up: the workspace
-`format` (3), the database `schema` / `PRAGMA user_version` (3), and the
-package semver (0.1.0). Name the axis whenever a number could be mistaken for
-another one; `v` is reserved for git release tags. See
-[product/spec-versioning.md](product/spec-versioning.md) §0.1.
+Three version numbers do not line up: the workspace `format` (1), the database
+`schema` / `PRAGMA user_version` (3), and the package semver (0.1.0). Name the
+axis whenever a number could be mistaken for another one; `v` is reserved for
+git release tags. One relationship exists and runs one way: a format bump is
+always breaking, so it always forces a package version bump — never the
+reverse. See [product/spec-versioning.md](product/spec-versioning.md) §0.1.
 
 ## Architecture
 
@@ -302,15 +303,15 @@ boundaries, and product behavior.
   `mcp-tool-contracts` skill.
 - Tool names are stable snake_case; the server namespace is Ferumind.
 - The workspace format is versioned (`workspace/system/meta.yml`,
-  `format: 3`; product/spec-versioning.md is the full spec). Writes against
-  a mismatched format fail with `FORMAT_UNSUPPORTED`; migration is explicit
-  (`ferumind migrate`), never implicit. The MCP surface itself is not
-  wire-versioned: additive within a format, breaking changes ride a format
-  bump with migration proven in the same work unit. Migrators normally ship;
-  an explicit single-owner/single-workspace decision may instead authorize
-  tested, evidenced, untracked one-shot tooling that is deleted before
-  landing. DB schema changes go through numbered migrations in
-  `db/migrations/` (`PRAGMA user_version`) — never ad-hoc `ALTER` calls.
+  `format: 1`; product/spec-versioning.md is the full spec). Format 1 is the
+  floor — nothing precedes it. Writes against a mismatched format fail with
+  `FORMAT_UNSUPPORTED`; migration is explicit (`ferumind migrate`), never
+  implicit. The MCP surface itself is not wire-versioned: additive changes are
+  free, while renames and removals are breaking and bump the package version.
+  A format bump never lands without its migrator, fixtures, and tests in the
+  same change — see Versioning and releases below. DB schema changes go
+  through numbered migrations in `db/migrations/` (`PRAGMA user_version`) —
+  never ad-hoc `ALTER` calls.
 
 ### Tool annotation taxonomy
 
@@ -459,8 +460,49 @@ nonexistent paths.
 - Starting a tunnel is operator-initiated; the launcher refuses to start
   when `CI` is set.
 
+## Versioning and releases
+
+Ferumind is `0.MINOR.PATCH`. The leading zero means the versioned surfaces
+still move. [docs/releases.md](docs/releases.md) is the full document; these
+are the rules that bind you.
+
+**The five versioned surfaces.** MCP tool surface (names, arguments, result
+fields, error codes), workspace format, CLI commands and flags, config/env
+keys, `ferumind://` resource URIs. **Nothing else is versioned** — the Python
+import API is private and changes freely, and so does the SQLite schema.
+
+**Classify every change** against those surfaces:
+
+- **Breaking** — a format bump; a tool removed or renamed; a required argument
+  added; an argument's meaning or type changed; a result field removed,
+  renamed, or retyped; an error code removed or redefined; a CLI command or
+  flag removed or renamed; a config key removed or a default that changes
+  behavior; the Python floor rising.
+- **Not breaking** — a new tool; a new *optional* argument; a new result
+  field; a new error code for a new condition; a new CLI command or optional
+  flag; a new config key with a safe default; a new folder or optional
+  frontmatter key older code ignores; the Python ceiling rising; fixes,
+  performance, docs, and refactors.
+
+**Non-breaking is not the safe default.** When you cannot tell, say so in the
+pull request. Do not pick the smaller label because it is less alarming.
+
+**What you do:** add one line to `## [Unreleased]` in
+[CHANGELOG.md](CHANGELOG.md) under `Breaking`, `Added`, `Changed`, or `Fixed`.
+That is the whole obligation.
+
+**What you never do:** edit `version` in `pyproject.toml`; create, move, or
+delete a tag; push to `main`. Cutting a release is an owner act, and a pushed
+tag is frozen forever.
+
+**Format bumps** are always breaking and never land alone: the migrator, its
+synthetic fixtures, and its tests belong in the same change. There is no
+exception — the single-workspace one that predated publication is spent.
+
 ## Git Workflow
 
+- `main` is trunk and is protected; never push to it directly. Branch → pull
+  request → green `ci-gate` → merge.
 - OpenCode is committed source of truth
 - Other agent configs are generated by `scripts/sync_agent_configs.py`
 - `.opencode/` is committed
@@ -488,6 +530,9 @@ nonexistent paths.
 - Committing generated agent configs
 - Creating code with global mutable state
 - Using `nano` in docs/scripts/instructions (use `vim`)
+- Pushing to `main` directly, or editing `version` in `pyproject.toml`
+- Creating, moving, or deleting a git tag
+- Landing a workspace-format bump without its migrator, fixtures, and tests
 
 ## Env / Config Sync Rules
 

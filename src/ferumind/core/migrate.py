@@ -2,9 +2,9 @@
 
 Migration of user Markdown is never implicit: ``ferumind migrate`` is the
 only entry point. Ferumind ships the frame with an **empty** migrator
-registry. The first real migrator was audited and exercised as owner-authorized
-local one-shot tooling for the format 2 → 3 cutover, then removed before the
-permanent format-3 change landed.
+registry, because format 1 is the floor and nothing precedes it. The registry
+fills when the first format bump needs it, and a bump never lands without its
+migrator, fixtures, and tests in the same change.
 
 Flow: resolve the ``N → N+1`` migrator chain, create a full workspace
 tarball backup and a global snapshot, run each migrator, rebuild the index,

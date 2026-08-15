@@ -87,7 +87,7 @@ id: doc_…                # existing stable id, server-generated
 type: document           # constant; replaces type: canvas
 project: <key>
 title: <str>
-description: <str>       # required (format 3); what this document is for
+description: <str>       # required; what this document is for
 status: active           # active | gated | frozen | archived; default active
 edit_policy: free        # optional: free | append | propose-first | ask-human
 created: <iso>           # server-set
@@ -97,7 +97,7 @@ updated: <iso>           # server-maintained, protected
 - **Protected keys** (existing mechanism, unchanged): `id`, `type`,
   `project`, `created`; `updated` is automatic. `propose_frontmatter_patch`
   refuses them (`FRONTMATTER_PROTECTED`).
-- `description` is **required on every managed document** as of format 3
+- `description` is **required on every managed document** in format 1
   ([spec-versioning.md](spec-versioning.md) §1): a non-empty string of at
   most 300 characters (`MAX_DESCRIPTION_CHARS`, `core/frontmatter.py`),
   answering one question — what is this document for? As navigation metadata
@@ -189,8 +189,8 @@ Rules:
   `descriptions_bytes`, and total result bytes in the observation log on
   every `get_context` call, and the same numbers are echoed in the `payload`
   field so they're visible in transcripts. `descriptions_bytes` is broken out
-  separately because format 3 put a new per-document cost in the contract
-  call, and the whole `MAX_DESCRIPTION_CHARS` bound is a guess until this
+  separately because descriptions are a per-document cost paid on every
+  contract call, and the `MAX_DESCRIPTION_CHARS` bound is a guess until this
   number says otherwise. A cap is a later decision made from this data.
 
 ## 5. Tool inventory

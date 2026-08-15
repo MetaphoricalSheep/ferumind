@@ -17,6 +17,29 @@ guards that keep it honest are in [docs/python-support.md](docs/python-support.m
 The locked product contract is in `product/`; where implementation and
 `product/spec-mcp.md` disagree, the specification wins.
 
+## How change lands
+
+`main` is trunk and is protected. Nothing is pushed to it directly.
+
+1. Branch from `main`.
+2. Open a pull request.
+3. Green CI — the `ci-gate` check covers the Python 3.12-3.14 matrix and the
+   MCP SDK compatibility rows.
+4. Merge.
+
+Releases are cut separately from landing changes, so **a pull request never
+edits the version in `pyproject.toml` and never creates a tag.** If your
+change touches a versioned surface, add a line to `## [Unreleased]` in
+[CHANGELOG.md](CHANGELOG.md) under `Breaking`, `Added`, `Changed`, or
+`Fixed`. [docs/releases.md](docs/releases.md) defines which surfaces are
+versioned, what counts as breaking, and how a release is cut.
+
+If you cannot tell whether a change is breaking, say so in the pull request
+rather than picking the smaller label.
+
+A workspace format bump is always breaking and never lands alone: its
+migrator, fixtures, and tests belong in the same pull request.
+
 ## Pull requests
 
 - Keep core behavior in `ferumind.core`; the MCP, CLI, and dashboard layers

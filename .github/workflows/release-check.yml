@@ -1,0 +1,48 @@
+# Proves a pushed tag and pyproject.toml agree.
+#
+# This cannot live in pytest: CI checks out at a fixed depth with no tags, so
+# a test asserting "the tag on HEAD matches the version" would either be
+# unable to see the tag or pass vacuously. The tag ref is only available to a
+# workflow triggered by the tag push itself.
+#
+# One tag, one commit, one version, one changelog entry — see docs/releases.md.
+name: Release check
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  tag-matches-version:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out the tagged commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Compare the tag against pyproject.toml and the changelog
+        env:
+          TAG_REF: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          tag_version="${TAG_REF#v}"
+          project_version="$(
+            python -c 'import tomllib,pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])'
+          )"
+
+          if [ "$tag_version" != "$project_version" ]; then
+            echo "::error::tag ${TAG_REF} declares ${tag_version}, pyproject.toml declares ${project_version}"
+            exit 1
+          fi
+
+          if ! grep -q "^## \[${project_version}\] - " CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no dated section for ${project_version}"
+            exit 1
+          fi
+
+          echo "${TAG_REF} matches pyproject.toml and CHANGELOG.md at ${project_version}"

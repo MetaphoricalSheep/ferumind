@@ -1,4 +1,4 @@
-"""Folder = role: the format 3 project layout (product/spec-mcp.md §2, 00 D2).
+"""Folder = role: the format 1 project layout (product/spec-mcp.md §2, 00 D2).
 
 A document's role derives from its first path segment; there is no ``role:``
 frontmatter key. Role folders nest arbitrarily below the first segment.

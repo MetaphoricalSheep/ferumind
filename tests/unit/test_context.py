@@ -134,13 +134,19 @@ def test_spine_and_payload_telemetry(
     assert all(document.size_bytes > 0 for document in context.documents)
 
 
-def test_payload_echoes_the_older_workspace_format_that_was_read(
+def test_payload_echoes_the_workspace_format_that_was_read(
     conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
 ) -> None:
-    old_format = SUPPORTED_FORMAT - 1
-    write_format_marker(workspace, old_format)
+    """The payload reports the marker, never the build's supported number.
 
-    assert _context(conn, workspace, project).payload.format == old_format
+    Probed with a marker the build does *not* support, since a matching one
+    cannot tell the two apart. Format 1 is the floor, so the unsupported
+    value has to be above it rather than below.
+    """
+    foreign_format = SUPPORTED_FORMAT + 1
+    write_format_marker(workspace, foreign_format)
+
+    assert _context(conn, workspace, project).payload.format == foreign_format
 
 
 def test_payload_does_not_invent_a_format_for_an_unreadable_marker(

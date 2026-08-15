@@ -42,8 +42,14 @@ running it themselves.
 
 ## Supported versions
 
-This project is pre-1.0. Security fixes are made on the latest `main` branch.
-No older release line currently receives backports.
+This project is pre-1.0. Security fixes are made on the latest `main` branch
+and reach users in the next tag.
+
+A tag is a snapshot, not a maintained line. No older tag receives backports:
+if `0.4.0` is out, a fix for a problem present in `0.3.x` ships as `0.4.x` or
+later, and upgrading is the remedy. Only the newest release is supported.
+[docs/releases.md](docs/releases.md) sets out the versioning scheme and what
+it does and does not promise.
 
 ## CI supply-chain policy
 
