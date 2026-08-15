@@ -62,7 +62,7 @@ dev = [
   # PEP 440 comparison for scripts/mcp_matrix_versions.py. Already present as a
   # transitive dependency, declared directly because a script depends on it:
   # hand-rolled version ordering gets 2.10.0 vs 2.9.0 wrong.
-  "packaging>=24.0,<27",
+  "packaging>=26.3,<27",
 ]
 
 [project.urls]
