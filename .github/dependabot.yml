@@ -1,5 +1,12 @@
 version: 2
 
+# Review routing lives in two places on purpose. `assignees` puts the pull
+# request in the owner's "Assigned" queue; review requests come from
+# .github/CODEOWNERS, because Dependabot's own `reviewers:` key was removed in
+# May 2025 and is now ignored if present. Both produce a notification even when
+# the repository is not being watched for all activity, which a weekly
+# unattended run otherwise would not.
+
 updates:
   - package-ecosystem: uv
     directory: /
@@ -7,6 +14,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    assignees:
+      - MetaphoricalSheep
 
   - package-ecosystem: npm
     directory: /.opencode
@@ -14,6 +23,8 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    assignees:
+      - MetaphoricalSheep
 
   - package-ecosystem: github-actions
     directory: /
@@ -21,3 +32,5 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
+    assignees:
+      - MetaphoricalSheep
