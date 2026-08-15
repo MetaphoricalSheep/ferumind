@@ -53,6 +53,39 @@ def test_create_snapshot_writes_before_after_diff_metadata(tmp_path: Path) -> No
     assert (snapshot_dir / "before/canvases/a.md").stat().st_mode & 0o777 == 0o600
 
 
+def test_snapshot_root_is_re_privatized_even_after_being_widened(tmp_path: Path) -> None:
+    """The deliberate half of S-09, pinned so a later cleanup cannot undo it.
+
+    Operator-owned directories keep whatever mode the operator sets, but
+    ``.ferumind/`` is Ferumind's own state and snapshots hold verbatim copies
+    of document bodies. ``SECURITY.md`` promises it stays private, so this one
+    is re-asserted on every touch rather than only set on create.
+    """
+    snapshots_root = tmp_path / ".ferumind" / "snapshots"
+    create_snapshot(
+        tmp_path,
+        project_key="demo",
+        target_path="canvases/a.md",
+        before_content="old\n",
+        after_content="new\n",
+        reason="apply_patch",
+        snapshot_id=new_snapshot_id(),
+    )
+    snapshots_root.chmod(0o755)
+
+    create_snapshot(
+        tmp_path,
+        project_key="demo",
+        target_path="canvases/b.md",
+        before_content="old\n",
+        after_content="new\n",
+        reason="apply_patch",
+        snapshot_id=new_snapshot_id(),
+    )
+
+    assert snapshots_root.stat().st_mode & 0o777 == 0o700
+
+
 def test_missing_sides_are_tolerated(tmp_path: Path) -> None:
     snapshot_id = new_snapshot_id()
     snapshot_dir = create_snapshot(

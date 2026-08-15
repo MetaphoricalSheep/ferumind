@@ -115,6 +115,9 @@ class Database:
 
     def init_schema(self) -> None:
         """Create or migrate the schema to the latest version."""
+        # The database is Ferumind's own state, so its directory mode is
+        # re-asserted on every init rather than only set on create. See
+        # ``core.file_io`` for why operator-owned directories differ.
         self._db_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         self._db_path.parent.chmod(0o700)
         migrations = discover_migrations(self._migrations_dir)

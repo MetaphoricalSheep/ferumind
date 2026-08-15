@@ -25,6 +25,8 @@ def _acquire_file_lock(lock_file: Path, label: str, timeout: float) -> Generator
     silently continuing would make every hash check and collision check
     racy while presenting the operation as protected.
     """
+    # `.ferumind/locks` is Ferumind's own state, not the operator's, so its
+    # mode is re-asserted rather than merely set on create. See ``file_io``.
     lock_file.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     lock_file.parent.chmod(0o700)
     lock_path = str(lock_file)

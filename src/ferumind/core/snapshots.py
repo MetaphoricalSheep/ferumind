@@ -75,6 +75,14 @@ def new_snapshot_id() -> str:
 
 
 def _private_directory(path: Path) -> None:
+    """Force *path* to 0700, on create and on every later touch.
+
+    Snapshots hold verbatim copies of document bodies under ``.ferumind/``, so
+    this is Ferumind's own state rather than a directory the operator arranges.
+    ``SECURITY.md`` promises it stays private and no workflow needs it widened,
+    which is why the mode is re-asserted here and merely set on create for the
+    operator-owned directories. See ``file_io`` for the rule.
+    """
     path.mkdir(mode=0o700, parents=True, exist_ok=True)
     path.chmod(0o700)
 

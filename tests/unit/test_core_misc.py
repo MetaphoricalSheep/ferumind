@@ -11,7 +11,7 @@ from pydantic import ValidationError as PydanticValidationError
 from ferumind.core.config import load_config
 from ferumind.core.documents import parse_document_content
 from ferumind.core.errors import ERROR_CODES, FerumindError, PatchConflictError
-from ferumind.core.file_io import atomic_write_text
+from ferumind.core.file_io import atomic_write_text, ensure_private_directory
 from ferumind.core.frontmatter import FrontmatterBehavior, generate_frontmatter
 from ferumind.core.policy import FROZEN_NOTE, POLICY_NOTES, policy_echo_for
 from ferumind.mcp.models import (
@@ -94,6 +94,71 @@ def test_atomic_write_creates_private_parent_and_file(tmp_path: Path) -> None:
     target = tmp_path / "nested" / "value.txt"
     atomic_write_text(target, "private\n")
     assert target.parent.stat().st_mode & 0o777 == 0o700
+    assert target.stat().st_mode & 0o777 == 0o600
+
+
+def test_ensure_private_directory_creates_every_missing_parent_privately(tmp_path: Path) -> None:
+    """``mkdir(parents=True)`` applies its mode to the leaf only.
+
+    A private directory reached through a world-listable parent is not
+    private, and nothing about the leaf's own mode reveals that.
+    """
+    leaf = tmp_path / "one" / "two" / "three"
+
+    ensure_private_directory(leaf)
+
+    for created in (leaf, leaf.parent, leaf.parent.parent):
+        assert created.stat().st_mode & 0o777 == 0o700, f"{created} is not private"
+
+
+def test_ensure_private_directory_keeps_an_existing_directory_as_the_operator_set_it(
+    tmp_path: Path,
+) -> None:
+    """S-09. An operator who widens a workspace directory keeps that choice."""
+    shared = tmp_path / "shared"
+    shared.mkdir(mode=0o700)
+    shared.chmod(0o750)
+
+    ensure_private_directory(shared)
+
+    assert shared.stat().st_mode & 0o777 == 0o750
+
+
+def test_atomic_write_does_not_revert_an_operators_directory_mode(tmp_path: Path) -> None:
+    """S-09. The reverting chmod ran on every write, not only on create."""
+    target = tmp_path / "documents" / "note.md"
+    atomic_write_text(target, "first\n")
+    target.parent.chmod(0o750)
+
+    atomic_write_text(target, "second\n")
+
+    assert target.parent.stat().st_mode & 0o777 == 0o750
+    assert target.read_text(encoding="utf-8") == "second\n"
+
+
+def test_atomic_write_preserves_an_existing_files_mode(tmp_path: Path) -> None:
+    """A rename carries the temporary file's mode onto the destination.
+
+    Left alone that resets an operator-chosen mode to mkstemp's 0600 on every
+    save — the same defect as the directory chmod, one level down, and the
+    half S-09 did not name.
+    """
+    target = tmp_path / "note.md"
+    atomic_write_text(target, "first\n")
+    target.chmod(0o640)
+
+    atomic_write_text(target, "second\n")
+
+    assert target.stat().st_mode & 0o777 == 0o640
+    assert target.read_text(encoding="utf-8") == "second\n"
+
+
+def test_atomic_write_never_widens_a_new_file(tmp_path: Path) -> None:
+    """Preserving an existing mode must not become inventing a permissive one."""
+    target = tmp_path / "fresh.md"
+
+    atomic_write_text(target, "new\n")
+
     assert target.stat().st_mode & 0o777 == 0o600
 
 

@@ -344,6 +344,9 @@ def create_backup_tarball(
         raise PathSafetyError("Migration backups must stay inside the workspace") from exc
     if relative == Path("."):
         raise PathSafetyError("Migration backups must use a dedicated workspace subdirectory")
+    # Backups are whole-workspace archives, so this directory is as sensitive
+    # as the workspace itself and its mode is re-asserted on every migration
+    # rather than only set on create. See ``core.file_io`` for the rule.
     safe_backup_dir = contained_path(workspace, relative.as_posix())
     safe_backup_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
     safe_backup_dir.chmod(0o700)

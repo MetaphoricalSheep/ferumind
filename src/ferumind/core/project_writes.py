@@ -28,7 +28,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict
 
 from ferumind.core.errors import FerumindError, FrontmatterInvalidError, PathExistsError
-from ferumind.core.file_io import atomic_write_text
+from ferumind.core.file_io import atomic_write_text, ensure_private_directory
 from ferumind.core.folders import PROJECT_DIRECTORIES, SPINE_FILENAME
 from ferumind.core.frontmatter import (
     MAX_DESCRIPTION_CHARS,
@@ -148,9 +148,11 @@ def create_project(
             after_files=after_files,
         )
 
+        # `projects` belongs to the operator: created private, never re-chmodded.
+        # The staging base is Ferumind's own private state, so it is forced to
+        # 0700 on every touch. See ``file_io`` for the rule.
         projects_root = contained_path(workspace_root, "projects")
-        projects_root.mkdir(mode=0o700, parents=True, exist_ok=True)
-        projects_root.chmod(0o700)
+        ensure_private_directory(projects_root)
         staging_base = contained_path(workspace_root, ".ferumind/project-staging")
         staging_base.mkdir(mode=0o700, parents=True, exist_ok=True)
         staging_base.chmod(0o700)

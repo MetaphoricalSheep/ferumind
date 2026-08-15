@@ -28,7 +28,7 @@ from ferumind.core.errors import (
     FrontmatterInvalidError,
     ValidationError,
 )
-from ferumind.core.file_io import atomic_write_text
+from ferumind.core.file_io import atomic_write_text, ensure_private_directory
 from ferumind.core.frontmatter import extract_frontmatter_block
 from ferumind.core.locks import acquire_workspace_lock
 from ferumind.core.operations import OP_APPLIED, WORKSPACE_OPERATION_PROJECT, record_operation
@@ -676,8 +676,9 @@ def _ensure_compacts_dir(workspace_root: WorkspaceRoot) -> Path:
         if not compacts_dir.is_dir():
             raise ValidationError("workspace/compacts exists but is not a directory")
     else:
-        compacts_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
-    compacts_dir.chmod(0o700)
+        # Created private; an existing directory's mode is the operator's to
+        # set. See ``file_io`` for the rule and why the two halves differ.
+        ensure_private_directory(compacts_dir)
     return compacts_dir
 
 
