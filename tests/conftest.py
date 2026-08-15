@@ -33,6 +33,24 @@ from ferumind.core.paths import WorkspaceRoot  # noqa: E402
 from ferumind.db.database import Database  # noqa: E402
 
 
+@pytest.fixture(autouse=True, scope="session")
+def plain_cli_output() -> object:
+    """Assert on CLI text without ANSI styling deciding the answer.
+
+    ``astral-sh/setup-uv`` exports ``FORCE_COLOR=1``, which makes Rich style
+    Typer's help panels. It renders an option name as two spans —
+    ``\\x1b[1;36m-\\x1b[0m\\x1b[1;36m-workspace\\x1b[0m`` — so ``"--workspace"
+    in result.output`` is false on CI and true on a developer machine. Pin the
+    environment for the whole session rather than stripping escapes at each
+    call site, because every ``in result.output`` assertion in the suite has
+    the same exposure.
+    """
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setenv("NO_COLOR", "1")
+        patch.delenv("FORCE_COLOR", raising=False)
+        yield
+
+
 @pytest.fixture
 def workspace(tmp_path: Path) -> WorkspaceRoot:
     """A bootstrapped workspace (skeleton + contract + format marker)."""

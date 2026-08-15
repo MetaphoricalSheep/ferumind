@@ -76,8 +76,10 @@ instance/
 *.sqlite-wal
 
 # ── Ferumind live workspace ──────────────────────────────────────────────────
-/workspace/*
-!/workspace/.gitkeep
+# Nothing here is tracked, not even a placeholder: bootstrap creates the
+# directory, and a tracked file inside it makes a fresh clone look like an
+# existing workspace with no format marker, which bootstrap refuses.
+/workspace/
 
 # ── Generated local agent configs ───────────────────────────────────────────
 # OpenCode is committed source of truth.
