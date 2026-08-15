@@ -63,7 +63,7 @@ structured metadata, and resource link. The default is a 1024-pixel longest
 edge at preferred JPEG quality 78. If needed, Ferumind first reduces quality no
 lower than 70, then geometry; an explicit lower-quality request is honored.
 This keeps ordinary photos useful for visual comparisons while preventing a
-caller retry from defeating the result budget. For the 4.4 MB garden photo
+caller retry from defeating the result budget. For the 4.4 MB photo
 used during compatibility testing, the 64 KiB budget retained a roughly
 616×818 rendition.
 
