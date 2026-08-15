@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import re
+import shutil
+import subprocess
 from collections import Counter
 from html.parser import HTMLParser
 from importlib import resources
@@ -14,6 +16,20 @@ STATIC_ROOT = REPOSITORY_ROOT / "src" / "ferumind" / "dashboard" / "static"
 INDEX = (STATIC_ROOT / "index.html").read_text(encoding="utf-8")
 CSS = (STATIC_ROOT / "dashboard.css").read_text(encoding="utf-8")
 JAVASCRIPT = (STATIC_ROOT / "dashboard.js").read_text(encoding="utf-8")
+
+
+def _run_frontend_assertions(assertions: str) -> None:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node is optional and unavailable; static frontend audits still run")
+    result = subprocess.run(
+        [node, "--eval", assertions],
+        cwd=REPOSITORY_ROOT,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
 
 
 class _MarkupAudit(HTMLParser):
@@ -248,6 +264,81 @@ def test_polling_is_ten_seconds_nonoverlapping_and_visibility_aware() -> None:
     assert 'document.addEventListener("visibilitychange"' in JAVASCRIPT
     assert "previously loaded detail" in JAVASCRIPT
     assert "last successful data is still displayed" in JAVASCRIPT
+
+
+def test_duplicate_source_issue_is_counted_once_and_its_message_is_shown() -> None:
+    _run_frontend_assertions(
+        r"""
+        const assert = require("node:assert/strict");
+        const {
+          degradationNoticeCopy,
+          uniqueDegradations,
+        } = require("./src/ferumind/dashboard/static/dashboard.js");
+        const activeIssue = {
+          component: "runtime_log",
+          code: "runtime_log_missing",
+          message: "The private runtime log is not present yet.",
+          affected_records: 0,
+        };
+        const metaIssue = {
+          ...activeIssue,
+          affected_records: null,
+        };
+
+        const issues = uniqueDegradations(
+          { degradations: [activeIssue] },
+          { degradations: [metaIssue] },
+        );
+
+        assert.equal(issues.length, 1);
+        assert.equal(
+          degradationNoticeCopy(issues),
+          "The private runtime log is not present yet. Available data remains visible.",
+        );
+        assert.equal(uniqueDegradations({ degraded: true }).length, 1);
+        """
+    )
+
+
+def test_distinct_source_issues_get_a_bounded_text_only_summary() -> None:
+    _run_frontend_assertions(
+        r"""
+        const assert = require("node:assert/strict");
+        const {
+          degradationNoticeCopy,
+          uniqueDegradations,
+        } = require("./src/ferumind/dashboard/static/dashboard.js");
+        const issues = uniqueDegradations({
+          degradations: [
+            {
+              component: "database",
+              code: "database_unavailable",
+              message: "<strong>Observation database unavailable</strong>.",
+            },
+            {
+              component: "runtime_log",
+              code: "runtime_log_missing",
+              message: "Private runtime log missing.",
+            },
+            {
+              component: "runtime_log",
+              code: "runtime_log_malformed",
+              message: "Malformed runtime rows were skipped.",
+            },
+          ],
+        });
+        const copy = degradationNoticeCopy(issues);
+
+        assert.equal(issues.length, 3);
+        assert.equal(
+          copy,
+          "3 diagnostic source issues are present: <strong>Observation database unavailable</strong>; Private runtime log missing; 1 more issue. Available data remains visible.",
+        );
+        assert.equal(copy.includes("Malformed runtime rows were skipped"), false);
+        assert.equal(copy.endsWith("Available data remains visible."), true);
+        """
+    )
+    assert 'setText("global-notice-copy", copy)' in JAVASCRIPT
 
 
 def test_dashboard_assets_are_loadable_as_package_resources() -> None:

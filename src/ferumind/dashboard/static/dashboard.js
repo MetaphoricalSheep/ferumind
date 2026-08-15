@@ -13,6 +13,8 @@
   const POLL_INTERVAL_MS = 10_000;
   const CALL_LIMIT = 50;
   const RUNTIME_LIMIT = 200;
+  const DEGRADATION_MESSAGE_LIMIT = 160;
+  const DEGRADATION_SUMMARY_LIMIT = 2;
   const SVG_NAMESPACE = "http://www.w3.org/2000/svg";
   const VALID_VIEWS = new Set(["overview", "calls", "errors", "performance", "runtime"]);
   const VALID_WINDOWS = new Set(["1h", "24h", "7d", "30d"]);
@@ -270,12 +272,88 @@
     container.append(group);
   }
 
-  function degradationCount(report) {
+  function degradationItems(report) {
     const value = first(report, ["degradations", "degraded"], []);
     if (Array.isArray(value)) {
-      return value.length;
+      return value.filter((item) => isRecord(item));
     }
-    return value ? 1 : 0;
+    if (isRecord(value)) {
+      return [value];
+    }
+    return value
+      ? [
+          {
+            component: "legacy",
+            code: "degraded",
+            message: "A diagnostic source issue is present.",
+          },
+        ]
+      : [];
+  }
+
+  function degradationIdentity(value) {
+    const issue = record(value);
+    const component = first(issue, ["component"], null);
+    const code = first(issue, ["code"], null);
+    if (typeof component === "string" && component !== "" && typeof code === "string" && code !== "") {
+      // This mirrors the core diagnostic merge key; counts and wording can vary by report window.
+      return JSON.stringify([component, code]);
+    }
+    return JSON.stringify([
+      component,
+      code,
+      first(issue, ["message"], null),
+      first(issue, ["affected_records"], null),
+    ]);
+  }
+
+  function uniqueDegradations(...reports) {
+    const unique = new Map();
+    for (const report of reports) {
+      for (const issue of degradationItems(report)) {
+        const identity = degradationIdentity(issue);
+        if (!unique.has(identity)) {
+          unique.set(identity, issue);
+        }
+      }
+    }
+    return [...unique.values()];
+  }
+
+  function degradationMessage(issue) {
+    const value = first(issue, ["message"], "A diagnostic source issue is present.");
+    const message =
+      typeof value === "string" && value.trim() !== ""
+        ? value.trim()
+        : "A diagnostic source issue is present.";
+    if (message.length <= DEGRADATION_MESSAGE_LIMIT) {
+      return message;
+    }
+    return `${message.slice(0, DEGRADATION_MESSAGE_LIMIT - 1)}…`;
+  }
+
+  function degradationNoticeCopy(issues) {
+    const availableCopy = "Available data remains visible.";
+    if (issues.length === 0) {
+      return availableCopy;
+    }
+    if (issues.length === 1) {
+      const message = degradationMessage(issues[0]);
+      const separator = /[.!?]$/u.test(message) ? " " : ". ";
+      return `${message}${separator}${availableCopy}`;
+    }
+
+    const summaries = issues
+      .slice(0, DEGRADATION_SUMMARY_LIMIT)
+      .map((issue) => degradationMessage(issue).replace(/[.!?]+$/u, ""));
+    const remaining = issues.length - summaries.length;
+    const remainder =
+      remaining > 0 ? `; ${formatCount(remaining)} more issue${remaining === 1 ? "" : "s"}` : "";
+    return `${formatCount(issues.length)} diagnostic source issues are present: ${summaries.join("; ")}${remainder}. ${availableCopy}`;
+  }
+
+  function degradationCount(report) {
+    return uniqueDegradations(report).length;
   }
 
   function reportGeneratedAt(report) {
@@ -484,12 +562,13 @@
       renderReport(view, activeReport);
       updateLastRefresh(activeReport);
       setConnection("success", "Local diagnostics responding", true);
-      const partialCount = degradationCount(activeReport) + degradationCount(state.reports.meta);
+      const partialIssues = uniqueDegradations(activeReport, state.reports.meta);
+      const partialCount = partialIssues.length;
       if (partialCount > 0) {
         setGlobalNotice(
           true,
           "Diagnostics are partially available",
-          `${formatCount(partialCount)} diagnostic source issue${partialCount === 1 ? " is" : "s are"} present. Available data remains visible.`,
+          degradationNoticeCopy(partialIssues),
           "caution",
         );
         setViewState(view, "Showing available data; some diagnostic sources are unavailable.");
@@ -1642,5 +1721,10 @@
     void refreshActiveView();
   }
 
-  start();
+  if (typeof module !== "undefined" && module.exports) {
+    // CommonJS is used only by repository frontend regression tests; browsers start normally.
+    module.exports = Object.freeze({ degradationNoticeCopy, uniqueDegradations });
+  } else {
+    start();
+  }
 })();

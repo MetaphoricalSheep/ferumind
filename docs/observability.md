@@ -51,6 +51,23 @@ Use `--open` to ask Ferumind to launch the default browser, `--port` to choose
 another loopback port, and `--workspace` to inspect a specific workspace.
 Ctrl+C stops the operator process cleanly.
 
+### "Diagnostics are partially available"
+
+This banner means one or more diagnostic sources could not be read; it does
+not mean that all Ferumind activity is unhealthy. The dashboard remains
+read-only and shows every source that is available. To print the exact source
+issues for the same workspace, run:
+
+```bash
+uv run ferumind doctor --workspace /path/to/workspace
+```
+
+On the first dashboard run after upgrading, the usual issue is a missing
+private runtime-event log. The dashboard does not create that log. Restart the
+updated MCP server (or its tunnel), then make an MCP call; the server creates
+`workspace/.ferumind/logs/ferumind.jsonl` and records its lifecycle there.
+Historical SQLite call observations remain available while the log is absent.
+
 ## Local-only security model
 
 The dashboard always binds `127.0.0.1`; there is deliberately no `--host`
