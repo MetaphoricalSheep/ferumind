@@ -21,6 +21,14 @@ ALLOWED_EXTENSIONS = {".md"}
 #: Extensions refused for upload_library_file (scripts/executables); every
 #: other extension, including none, is allowed. Deliberately permissive by
 #: design (denylist, not allowlist) per the upload feature's own decision.
+#:
+#: The line the list draws is "opening this hands control to its author":
+#: interpreters and binaries, launchers and shortcuts, documents a browser or
+#: viewer will execute script from, and mountable containers that carry a
+#: whole filesystem past every check above. A workspace is plain files meant
+#: to be synced and browsed, so the list stays cross-platform even though
+#: Ferumind itself targets POSIX — a ``.desktop`` or ``.lnk`` is inert here
+#: and live on the machine the folder syncs to.
 BLOCKED_UPLOAD_EXTENSIONS: Final[frozenset[str]] = frozenset(
     {
         ".sh",
@@ -71,6 +79,44 @@ BLOCKED_UPLOAD_EXTENSIONS: Final[frozenset[str]] = frozenset(
         ".hta",
         ".reg",
         ".lnk",
+        # Scriptable documents: a browser or image viewer opening one of these
+        # from the workspace folder runs whatever script it carries.
+        ".svg",
+        ".svgz",
+        ".html",
+        ".htm",
+        ".xhtml",
+        ".shtml",
+        ".mht",
+        ".mhtml",
+        # Launchers and shortcuts — inert on the serving host, live wherever
+        # the workspace folder is synced or browsed.
+        ".desktop",
+        ".url",
+        ".scf",
+        ".pif",
+        ".jnlp",
+        ".appimage",
+        ".run",
+        # Windows script hosts and control-panel/help surfaces.
+        ".jse",
+        ".vb",
+        ".ws",
+        ".cpl",
+        ".msc",
+        ".inf",
+        ".chm",
+        ".msp",
+        # macOS scripting.
+        ".scpt",
+        ".scptd",
+        ".applescript",
+        ".terminal",
+        # Mountable containers: a filesystem smuggled past every check above.
+        ".iso",
+        ".img",
+        ".vhd",
+        ".vhdx",
     }
 )
 

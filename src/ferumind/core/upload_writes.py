@@ -103,6 +103,22 @@ logger = logging.getLogger(__name__)
 
 _SHA256_RE: Final = re.compile(r"^[0-9a-fA-F]{64}$")
 
+#: Characters a POSIX filesystem accepts and a synced one does not. ``:`` is
+#: the one that matters for safety — on NTFS ``notes.txt:payload.exe`` names
+#: an alternate data stream rather than a file, so the extension the denylist
+#: inspected is not the extension that ends up executable. The rest cannot
+#: exist on Windows at all; refusing them at upload beats writing a file the
+#: owner's own sync client will later fail on or silently mangle.
+_RESERVED_FILENAME_CHARACTERS: Final = frozenset(':<>"|?*')
+
+#: Reserved on Windows with or without an extension: ``NUL.txt`` is the
+#: device, not a text file. Compared against the stem, case-folded.
+_RESERVED_DEVICE_NAMES: Final[frozenset[str]] = frozenset(
+    {"con", "prn", "aux", "nul"}
+    | {f"com{digit}" for digit in range(1, 10)}
+    | {f"lpt{digit}" for digit in range(1, 10)}
+)
+
 
 def _validated_metadata(metadata: JsonObject | None) -> JsonObject:
     value = dict(metadata or {})
@@ -146,6 +162,20 @@ def _validate_upload_filename(filename: str) -> str:
         ord(character) < 32 or ord(character) == 127 for character in name
     ):
         raise ValidationError("filename must not be hidden or contain control characters")
+    if not _RESERVED_FILENAME_CHARACTERS.isdisjoint(name):
+        raise ValidationError(
+            "filename must not contain any of "
+            f"{''.join(sorted(_RESERVED_FILENAME_CHARACTERS))} — they name "
+            "alternate data streams or cannot be synced to other filesystems"
+        )
+    # Windows strips trailing dots on create, so "payload.exe." reaches disk
+    # as "payload.exe" — and PurePath reports its suffix as "." rather than
+    # ".exe", which is what walks it past BLOCKED_UPLOAD_EXTENSIONS. Trailing
+    # whitespace is already refused by the strip() check above.
+    if name.endswith("."):
+        raise ValidationError("filename must not end in a dot")
+    if name.partition(".")[0].casefold() in _RESERVED_DEVICE_NAMES:
+        raise ValidationError(f"filename {filename!r} is a reserved device name")
     if len(name.encode("utf-8")) > MAX_UPLOAD_FILENAME_BYTES:
         raise ValidationError(
             f"filename exceeds the {MAX_UPLOAD_FILENAME_BYTES}-byte filesystem limit"

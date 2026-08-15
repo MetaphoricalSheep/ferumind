@@ -361,6 +361,70 @@ class TestUploadLibraryFile:
                     conn, workspace, project, filename=bad_name, content_base64=_PDF_B64
                 )
 
+    @pytest.mark.parametrize(
+        "filename",
+        [
+            # NTFS alternate data stream: the name carries a second, executable
+            # stream that the extension check never sees.
+            "notes.pdf:payload.exe",
+            # Cannot exist on a filesystem the workspace folder may be synced to.
+            "report<1>.pdf",
+            'quote".pdf',
+            "pipe|.pdf",
+            "star*.pdf",
+            "question?.pdf",
+            # Windows drops the trailing dot on create, landing an .exe on disk.
+            "payload.exe.",
+            "payload.exe..",
+            "trailing.",
+            # Reserved device names, bare and with an extension.
+            "CON",
+            "nul.txt",
+            "Com1.pdf",
+            "LPT9.pdf",
+        ],
+    )
+    def test_cross_platform_hostile_filenames_rejected(
+        self,
+        conn: sqlite3.Connection,
+        workspace: WorkspaceRoot,
+        project: str,
+        filename: str,
+    ) -> None:
+        with pytest.raises(ValidationError):
+            upload_library_file(
+                conn, workspace, project, filename=filename, content_base64=_PDF_B64
+            )
+
+    @pytest.mark.parametrize(
+        "filename",
+        ["diagram.svg", "saved-page.html", "launcher.desktop", "disk.iso", "script.scpt"],
+    )
+    def test_newly_blocked_extensions_rejected(
+        self,
+        conn: sqlite3.Connection,
+        workspace: WorkspaceRoot,
+        project: str,
+        filename: str,
+    ) -> None:
+        with pytest.raises(UnsupportedFileTypeError):
+            upload_library_file(
+                conn, workspace, project, filename=filename, content_base64=_PDF_B64
+            )
+
+    @pytest.mark.parametrize("filename", ["report.pdf", "notes.txt", "photo.jpg", "data.csv"])
+    def test_ordinary_filenames_still_accepted(
+        self,
+        conn: sqlite3.Connection,
+        workspace: WorkspaceRoot,
+        project: str,
+        filename: str,
+    ) -> None:
+        result = upload_library_file(
+            conn, workspace, project, filename=filename, content_base64=_PDF_B64
+        )
+        assert result.path == f"library/{filename}"
+
     def test_hidden_nested_folder_is_rejected(
         self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
     ) -> None:
