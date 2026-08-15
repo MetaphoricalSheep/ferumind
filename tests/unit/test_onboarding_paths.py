@@ -6,6 +6,7 @@ setup to fall back on, so a silent regression is expensive.
 
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
@@ -17,13 +18,17 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 BOOTSTRAP = REPO_ROOT / "scripts" / "bootstrap_workspace.py"
 
 
-def _run(*args: str, env_extra: dict[str, str] | None = None) -> subprocess.CompletedProcess[str]:
+def _run(
+    *args: str,
+    env_extra: dict[str, str] | None = None,
+    cwd: Path = REPO_ROOT,
+) -> subprocess.CompletedProcess[str]:
     env = {"PATH": "/usr/bin:/bin", "HOME": str(Path.home()), **(env_extra or {})}
     return subprocess.run(
         [sys.executable, *args],
         capture_output=True,
         text=True,
-        cwd=REPO_ROOT,
+        cwd=cwd,
         env=env,
         timeout=180,
     )
@@ -58,11 +63,30 @@ class TestBootstrapWorkspaceResolution:
     def test_relative_value_resolves_against_the_repo_not_the_cwd(self, tmp_path: Path) -> None:
         """A relative FERUMIND_WORKSPACE must mean the same directory to
         bootstrap and to ``ferumind info``, whatever the caller's cwd.
+
+        The relative value points at *tmp_path* expressed from the repo root,
+        and the subprocess runs from a different directory. That keeps the
+        assertion honest without the earlier version's cost: passing the bare
+        value ``workspace`` bootstrapped the checkout's own ``workspace/`` —
+        the owner's live data on a developer machine.
         """
-        result = _run(str(BOOTSTRAP), env_extra={"FERUMIND_WORKSPACE": "workspace"})
+        target = tmp_path / "resolved-workspace"
+        caller_cwd = tmp_path / "caller" / "cwd"
+        caller_cwd.mkdir(parents=True)
+        relative = os.path.relpath(target, REPO_ROOT)
+        assert not Path(relative).is_absolute()
+
+        result = _run(
+            str(BOOTSTRAP),
+            env_extra={"FERUMIND_WORKSPACE": relative},
+            cwd=caller_cwd,
+        )
+
         assert result.returncode == 0, result.stderr
-        # Resolved against REPO_ROOT; nothing was created under tmp_path.
-        assert not (tmp_path / "workspace").exists()
+        assert (target / "system" / "meta.yml").is_file()
+        resolved_against_cwd = (caller_cwd / relative).resolve()
+        if resolved_against_cwd != target:
+            assert not resolved_against_cwd.exists(), "the value was resolved against the cwd"
 
 
 class TestProjectCreateCommand:
