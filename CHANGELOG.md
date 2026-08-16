@@ -8,6 +8,11 @@ Versioning, what a tag promises, and how a release is cut are documented in
 
 ## [Unreleased]
 
+### Added
+
+- Dependabot tier policy with grouped patch updates and native auto-merge for
+  safe tiers; majors and `mcp` stay manual (`docs/dependencies.md`).
+
 ## [0.1.0] - 2026-08-15
 
 First public source release. Ferumind is a local-first, Markdown-backed

@@ -24,8 +24,13 @@ The locked product contract is in `product/`; where implementation and
 1. Branch from `main`.
 2. Open a pull request.
 3. Green CI — the `ci-gate` check covers the Python 3.12-3.14 matrix and the
-   MCP SDK compatibility rows.
-4. Merge.
+   MCP SDK compatibility rows; `analyze` (CodeQL) is also required.
+4. Merge (squash only).
+
+Dependency updates from Dependabot follow the tier policy in
+[docs/dependencies.md](docs/dependencies.md): patch (and Actions non-major)
+updates may auto-merge once required checks pass; majors and `mcp` stay
+manual.
 
 Releases are cut separately from landing changes, so **a pull request never
 edits the version in `pyproject.toml` and never creates a tag.** If your

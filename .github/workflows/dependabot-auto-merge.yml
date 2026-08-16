@@ -1,0 +1,77 @@
+# Enable GitHub native auto-merge for Dependabot PRs in the auto tiers.
+#
+# This does not approve pull requests and does not raise the default GITHUB_TOKEN
+# beyond what enabling auto-merge requires. Required checks on `main`
+# (`ci-gate`, `analyze`) still gate every merge — including these.
+#
+# Policy: docs/dependencies.md (REL-034).
+
+name: Dependabot auto-merge
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: dependabot-auto-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  enable:
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Fetch Dependabot metadata
+        id: meta
+        uses: dependabot/fetch-metadata@25dd0e34f4fe68f24cc83900b1fe3fe149efef98 # v3.1.0
+
+      - name: Decide whether this PR is an auto tier
+        id: decide
+        env:
+          ECOSYSTEM: ${{ steps.meta.outputs.package-ecosystem }}
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          DEPENDENCY_NAMES: ${{ steps.meta.outputs.dependency-names }}
+        run: |
+          set -euo pipefail
+          enable=false
+          names_lc="$(printf '%s' "$DEPENDENCY_NAMES" | tr '[:upper:]' '[:lower:]')"
+
+          # mcp stays manual at every level — sdk_internals attachment points.
+          case ",$names_lc," in
+            *,mcp,*|*,mcp\[cli\],*|*,mcp-*)
+              echo "Skipping auto-merge: mcp family ($DEPENDENCY_NAMES)"
+              echo "enable=$enable" >>"$GITHUB_OUTPUT"
+              exit 0
+              ;;
+          esac
+
+          case "$ECOSYSTEM" in
+            github_actions)
+              case "$UPDATE_TYPE" in
+                version-update:semver-patch|version-update:semver-minor)
+                  enable=true
+                  ;;
+              esac
+              ;;
+            uv|pip|npm_and_yarn|npm)
+              case "$UPDATE_TYPE" in
+                version-update:semver-patch)
+                  enable=true
+                  ;;
+              esac
+              ;;
+          esac
+
+          echo "ecosystem=$ECOSYSTEM update_type=$UPDATE_TYPE names=$DEPENDENCY_NAMES enable=$enable"
+          echo "enable=$enable" >>"$GITHUB_OUTPUT"
+
+      - name: Enable auto-merge when the tier allows it
+        if: steps.decide.outputs.enable == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+        run: gh pr merge --auto --squash "$PR_URL"
