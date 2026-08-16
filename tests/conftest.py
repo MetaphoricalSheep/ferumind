@@ -17,7 +17,9 @@ import io
 import math
 import random
 import sqlite3
+import struct
 import sys
+import zlib
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -122,6 +124,29 @@ def photograph_like(width: int, height: int, *, seed: int = 4242) -> Image.Image
             buffer[index + 2] = max(0, min(255, int(blue)))
             index += 3
     return Image.frombytes("RGB", (width, height), bytes(buffer))
+
+
+def png_declaring_geometry(width: int, height: int) -> bytes:
+    """Build a tiny PNG whose header claims *width* x *height* pixels.
+
+    The declared geometry is what every decompression-bomb guard reads, so a
+    bomb can be exercised in under a hundred bytes: allocating a real
+    hundred-megapixel raster to test that it is refused would cost the memory
+    the guard exists to protect.
+    """
+
+    def chunk(kind: bytes, payload: bytes) -> bytes:
+        crc = zlib.crc32(kind + payload) & 0xFFFFFFFF
+        return struct.pack(">I", len(payload)) + kind + payload + struct.pack(">I", crc)
+
+    # Bit depth 8, colour type 6 (RGBA), default compression/filter/interlace.
+    header = struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0)
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + chunk(b"IHDR", header)
+        + chunk(b"IDAT", zlib.compress(b"\x00" * 10))
+        + chunk(b"IEND", b"")
+    )
 
 
 @pytest.fixture(scope="session")

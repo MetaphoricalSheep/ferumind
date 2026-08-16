@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import random
 from pathlib import Path
 
@@ -24,6 +25,7 @@ from ferumind.core.renditions import (
     render_image_context,
     rendition_ceiling,
 )
+from tests.conftest import png_declaring_geometry
 
 
 def noisy_image(width: int, height: int, *, seed: int = 1234) -> Image.Image:
@@ -186,6 +188,33 @@ class TestBounds:
             render_image_context(source)
         assert excinfo.value.details is not None
         assert excinfo.value.details["max_pixels"] == 100
+
+    def test_geometry_past_pillows_own_ceiling_is_still_a_size_refusal(
+        self, tmp_path: Path
+    ) -> None:
+        """Pillow refuses inside ``Image.open``, before the explicit check.
+
+        ``read_file`` puts no byte cap in front of this, so the guard is the
+        only bound on a file that reached the workspace out of band. A size
+        refusal must stay ``FILE_TOO_LARGE`` rather than escaping as an
+        unhandled exception or being mislabelled as an undecodable file.
+        """
+        from ferumind.core import renditions
+
+        pillow_ceiling = Image.MAX_IMAGE_PIXELS
+        assert pillow_ceiling is not None
+        edge = math.isqrt(2 * pillow_ceiling) + 1
+        assert edge * edge > renditions.MAX_DECODED_PIXELS
+
+        source = tmp_path / "bomb.png"
+        source.write_bytes(png_declaring_geometry(edge, edge))
+
+        with pytest.raises(FileTooLargeError) as excinfo:
+            render_image_context(source)
+
+        assert excinfo.value.code == "FILE_TOO_LARGE"
+        assert excinfo.value.details is not None
+        assert excinfo.value.details["max_pixels"] == renditions.MAX_DECODED_PIXELS
 
     def test_maximum_request_cannot_exceed_the_encoded_byte_ceiling(self, tmp_path: Path) -> None:
         source = tmp_path / "dense.jpg"

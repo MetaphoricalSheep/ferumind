@@ -47,6 +47,12 @@ MAX_STORAGE_QUALITY: Final = 100
 
 #: Decompression-bomb ceiling, checked against header-declared dimensions
 #: before any pixel data is decoded. Mirrors ``renditions.MAX_DECODED_PIXELS``.
+#:
+#: Pillow enforces a ceiling of its own inside ``Image.open``, so geometry
+#: past roughly twice its ``MAX_IMAGE_PIXELS`` never reaches the check below.
+#: That refusal is correct but arrives as a Pillow exception; it is caught and
+#: re-raised as :class:`FileTooLargeError` so every oversized image fails the
+#: same way regardless of which ceiling caught it.
 MAX_DECODED_PIXELS: Final = 100_000_000
 
 JPEG_MIME_TYPE: Final = "image/jpeg"
@@ -197,6 +203,25 @@ def _encode(
     return buffer.getvalue()
 
 
+def _in_encodable_mode(image: Image.Image, pillow_format: str) -> Image.Image:
+    """Return *image* in a mode its own format can actually encode.
+
+    A palette or alpha mode that PNG holds happily is not writable as JPEG,
+    and WebP takes only RGB or RGBA. Converting picks the target that keeps
+    the most: transparency survives as RGBA wherever the format allows it,
+    and JPEG — which has no alpha at all — flattens to RGB.
+
+    The original is returned unchanged when no conversion is needed, so the
+    caller can tell a derived image from the one it passed in and close only
+    what this function created.
+    """
+    if pillow_format == "JPEG" and image.mode not in {"RGB", "L", "CMYK"}:
+        return image.convert("RGB")
+    if pillow_format == "WEBP" and image.mode not in {"RGB", "RGBA"}:
+        return image.convert("RGBA" if image.mode in _TRANSPARENT_MODES else "RGB")
+    return image
+
+
 def _unchanged(raw: bytes, mime_type: str | None, reason: str) -> ImageCompressionResult:
     return ImageCompressionResult(
         data=raw,
@@ -263,6 +288,16 @@ def compress_image_for_storage(
                     oriented.close()
     except FileTooLargeError:
         raise
+    except Image.DecompressionBombError as exc:
+        # Pillow's ceiling sits below this module's and is enforced during
+        # ``Image.open``, so the largest bombs are refused before the explicit
+        # check above ever sees their dimensions. Without this arm they would
+        # escape as an unhandled exception — an opaque internal error for the
+        # very inputs that most deserve a clear one.
+        raise FileTooLargeError(
+            "Image exceeds the decodable pixel limit",
+            details={"max_pixels": MAX_DECODED_PIXELS},
+        ) from exc
     except (UnidentifiedImageError, OSError, ValueError):
         # Not a decodable raster: a PDF, a text file, a truncated download.
         # Storage normalization simply does not apply.
@@ -273,12 +308,7 @@ def compress_image_for_storage(
         if resized:
             working.thumbnail((active.max_edge, active.max_edge), Image.Resampling.LANCZOS)
 
-        if pillow_format == "JPEG" and working.mode not in {"RGB", "L", "CMYK"}:
-            target = working.convert("RGB")
-        elif pillow_format == "WEBP" and working.mode not in {"RGB", "RGBA"}:
-            target = working.convert("RGBA" if working.mode in _TRANSPARENT_MODES else "RGB")
-        else:
-            target = working
+        target = _in_encodable_mode(working, pillow_format)
         try:
             encoded = _encode(
                 target,

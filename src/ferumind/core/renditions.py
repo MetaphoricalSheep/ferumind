@@ -77,6 +77,12 @@ _MIN_ADAPTIVE_IMAGE_EDGE: Final = 128
 #: Decompression-bomb ceiling, checked against the header-declared
 #: dimensions *before* any pixel data is decoded. 100 megapixels is well
 #: above any real camera output and far below what exhausts memory.
+#:
+#: Pillow enforces a ceiling of its own inside ``Image.open``, so geometry
+#: past roughly twice its ``MAX_IMAGE_PIXELS`` never reaches the check below.
+#: That refusal is correct but arrives as a Pillow exception; it is caught and
+#: re-raised as :class:`FileTooLargeError` so every oversized image fails the
+#: same way regardless of which ceiling caught it.
 MAX_DECODED_PIXELS: Final = 100_000_000
 
 JPEG_MIME_TYPE: Final = "image/jpeg"
@@ -326,6 +332,15 @@ def render_image_bytes(
             working.close()
     except FileTooLargeError:
         raise
+    except Image.DecompressionBombError as exc:
+        # Refused by Pillow inside ``Image.open``, before the explicit check
+        # above could read the geometry. It is a size refusal, not a decode
+        # failure, so it must not fall through to the arm below and be
+        # reported as an undecodable file.
+        raise FileTooLargeError(
+            "Image exceeds the decodable pixel limit",
+            details={"max_pixels": MAX_DECODED_PIXELS},
+        ) from exc
     except (UnidentifiedImageError, OSError, ValueError) as exc:
         raise ValidationError(
             "File could not be decoded as a supported raster image",

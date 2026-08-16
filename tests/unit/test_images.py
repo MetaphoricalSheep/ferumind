@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import math
 
 import pytest
 from PIL import Image
@@ -21,7 +22,7 @@ from ferumind.core.images import (
     compress_image_for_storage,
     webp_is_lossless,
 )
-from tests.conftest import photograph_like
+from tests.conftest import photograph_like, png_declaring_geometry
 
 
 def _pixels(data: bytes) -> bytes:
@@ -214,3 +215,26 @@ class TestDecompressionBomb:
         monkeypatch.setattr(images, "MAX_DECODED_PIXELS", 1000)
         with pytest.raises(FileTooLargeError):
             compress_image_for_storage(_png(200, 200))
+
+    def test_geometry_past_pillows_own_ceiling_is_still_a_size_refusal(self) -> None:
+        """The biggest bombs are caught by Pillow, not by the explicit check.
+
+        ``Image.open`` refuses geometry past twice Pillow's ``MAX_IMAGE_PIXELS``
+        before this module can read the dimensions, so the refusal arrives as a
+        Pillow exception. It must still reach the caller as ``FILE_TOO_LARGE``:
+        an eighty-byte file that produces an opaque internal error is worse
+        handling for a worse input.
+        """
+        from ferumind.core import images
+
+        pillow_ceiling = Image.MAX_IMAGE_PIXELS
+        assert pillow_ceiling is not None
+        edge = math.isqrt(2 * pillow_ceiling) + 1
+        assert edge * edge > images.MAX_DECODED_PIXELS
+
+        with pytest.raises(FileTooLargeError) as excinfo:
+            compress_image_for_storage(png_declaring_geometry(edge, edge))
+
+        assert excinfo.value.code == "FILE_TOO_LARGE"
+        assert excinfo.value.details is not None
+        assert excinfo.value.details["max_pixels"] == images.MAX_DECODED_PIXELS
