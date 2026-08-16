@@ -102,6 +102,19 @@ All three are optional, but tunnel startup requires both control-plane
 variables after loading. Each file must be a regular, non-symlink file owned
 by the current user or root and have mode `0600` or stricter.
 
+These files are loaded by sourcing them into bash, which makes their contents
+shell code rather than inert configuration. A value such as `KEY=$(command)`
+executes when the launcher starts. The ownership and permission checks above
+decide *who* may write a file that runs; they say nothing about what it does.
+Treat editing one as editing a script, and quote values containing spaces,
+`$`, backticks, or `;`.
+
+The background launcher also writes `~/.config/tunnel-client/<profile>.log`.
+The profile directory is created `0700` and the log `0600`, but relay logs can
+contain the tunnel URL, which this project treats as a credential granting
+full read and write access to the workspace. Do not copy that directory into a
+support bundle, an issue attachment, or a backup you would share.
+
 Never commit `.env` files. The `.env.example` file contains placeholder values
 only.
 

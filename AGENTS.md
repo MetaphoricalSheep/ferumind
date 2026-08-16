@@ -563,6 +563,10 @@ exception — the single-workspace one that predated publication is spent.
 - Pushing to `main` directly, or editing `version` in `pyproject.toml`
 - Creating, moving, or deleting a git tag
 - Landing a workspace-format bump without its migrator, fixtures, and tests
+- `git push --mirror` from this checkout, under any circumstances. A mirror
+  push publishes every local ref, including branches never meant to leave the
+  machine and namespaces written by tooling rather than by a person. Push
+  named branches only, and delete a local branch rather than carrying it.
 
 ## Env / Config Sync Rules
 
