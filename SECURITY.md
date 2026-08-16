@@ -175,6 +175,9 @@ Remote support is not complete until all of these are implemented and tested:
 4. Request-body, response, rate, concurrency, upload, and wall-clock limits at
    the ingress. `get_context` is intentionally uncapped by the product
    contract, so the gateway and workspace sizing policy must account for it.
+   The server refuses a read it cannot deliver over the configured transport
+   ceiling (`RESPONSE_TOO_LARGE`), but that is a transport guard, not a
+   capacity budget: it bounds one response, not concurrent or aggregate load.
 5. A dedicated unprivileged service account, a non-group-writable checkout,
    workspace directories at `0700`, secret files at `0600`, and encrypted,
    access-controlled backups.

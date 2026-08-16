@@ -19,6 +19,7 @@ from ferumind.core.paths import (
     contained_path,
     contained_project_root,
 )
+from ferumind.core.response_limits import ResponseBudget
 from ferumind.core.snapshots import (
     SnapshotMetadata,
     find_snapshot_dir,
@@ -64,8 +65,23 @@ def read_project_document(
     workspace: WorkspaceRoot,
     project_key: str,
     path: str,
+    *,
+    max_response_bytes: int | None = None,
 ) -> ProjectDocumentRead:
-    """Read one ordinary project Markdown document, excluding internals."""
+    """Read one ordinary project Markdown document, excluding internals.
+
+    *max_response_bytes* bounds the whole-document surface only. Ferumind caps
+    Markdown at 5 MiB on write, but the workspace is plain files that sync,
+    and a chat export or a large CSV renamed ``.md`` arrives out of band with
+    no cap at all — so the size of a file on disk is not evidence that any
+    transport can carry it back.
+
+    Callers that build a *bounded* result from the content — the range read,
+    the document map, ``find_in_document`` — deliberately pass ``None``.
+    Their responses are small however large the source is, and refusing them
+    on the source's size would make an oversized document unreadable by every
+    means instead of just the expensive one.
+    """
     project_root = contained_project_root(workspace, project_key)
     resolved = contained_path(project_root, path)
     if (
@@ -75,6 +91,17 @@ def read_project_document(
     ):
         raise DocumentNotFoundError(f"Document not found: {path}")
     rel = resolved.relative_to(project_root).as_posix()
+    # Charged from the stat, before the read: an undeliverable document is
+    # refused without ever being held in memory.
+    ResponseBudget(max_response_bytes, surface="read_document").charge(
+        resolved.stat().st_size,
+        source=f"the document {rel}",
+        remedy=(
+            "Read part of it instead — search_project to locate the section, "
+            "then read_document_range or find_in_document — or split the file "
+            "into smaller documents."
+        ),
+    )
     content = resolved.read_text(encoding="utf-8")
     parsed = parse_document_content(content, project_key=project_key, path=rel)
     return ProjectDocumentRead(path=rel, content=content, parsed=parsed)
@@ -118,12 +145,41 @@ def list_project_tree(
     ]
 
 
+def snapshot_side_fits(expected_size_bytes: int | None, budget: ResponseBudget) -> bool:
+    """Reserve response budget for one stored side, if it can be served at all.
+
+    A side that is absent, or already over its own 5 MiB cap, is never part
+    of the response — so it is not charged, and its bytes stay available to
+    the side that follows.
+    """
+    if expected_size_bytes is None or expected_size_bytes > MAX_SNAPSHOT_TEXT_BYTES:
+        return False
+    return budget.try_charge(expected_size_bytes)
+
+
 def read_project_snapshot(
     workspace: WorkspaceRoot,
     project_key: str,
     snapshot_id: str,
+    *,
+    max_response_bytes: int | None = None,
 ) -> ProjectSnapshotRead:
-    """Read and validate one project-file snapshot."""
+    """Read and validate one project-file snapshot.
+
+    Three components ride in one result, each capped at 5 MiB by its own
+    constant — a declared ceiling of 15 MiB against a 10 MiB transport, and
+    reachable without anything arriving out of band: edit a 4.9 MiB document
+    once and its snapshot holds two copies of it.
+
+    This surface omits rather than refuses, because it already had to: the
+    ``*_omitted`` flags predate *max_response_bytes* and exist for content
+    that is binary or over its own cap. A snapshot with one part left out is
+    still worth returning, and the flag says which part is missing. Priority
+    order is diff, then before, then after — the diff is the smallest and
+    says the most about what changed, and the after state is the one a caller
+    can usually recover by reading the live document.
+    """
+    budget = ResponseBudget(max_response_bytes, surface="read_snapshot")
     project_dir = contained_project_root(workspace, project_key)
     snapshot_dir = find_snapshot_dir(project_dir, snapshot_id)
     if snapshot_dir is None:
@@ -134,6 +190,19 @@ def read_project_snapshot(
             f"Snapshot {snapshot_id} metadata is missing, invalid, or mismatched"
         )
     target_path = metadata.target_path
+    if not target_path and any(
+        value is not None
+        for value in (
+            metadata.before_sha256,
+            metadata.before_size_bytes,
+            metadata.after_sha256,
+            metadata.after_size_bytes,
+        )
+    ):
+        raise _snapshot_integrity_error(snapshot_id, "metadata")
+
+    diff, diff_omitted = _read_bounded_snapshot_diff(snapshot_dir, snapshot_id, budget)
+
     before: str | None = None
     after: str | None = None
     before_omitted = False
@@ -146,6 +215,7 @@ def read_project_snapshot(
             target_path,
             expected_sha256=metadata.before_sha256,
             expected_size_bytes=metadata.before_size_bytes,
+            deliverable=snapshot_side_fits(metadata.before_size_bytes, budget),
         )
         after, after_omitted = _read_verified_snapshot_side(
             snapshot_dir,
@@ -154,18 +224,8 @@ def read_project_snapshot(
             target_path,
             expected_sha256=metadata.after_sha256,
             expected_size_bytes=metadata.after_size_bytes,
+            deliverable=snapshot_side_fits(metadata.after_size_bytes, budget),
         )
-    elif any(
-        value is not None
-        for value in (
-            metadata.before_sha256,
-            metadata.before_size_bytes,
-            metadata.after_sha256,
-            metadata.after_size_bytes,
-        )
-    ):
-        raise _snapshot_integrity_error(snapshot_id, "metadata")
-    diff, diff_omitted = _read_bounded_snapshot_diff(snapshot_dir, snapshot_id)
     return ProjectSnapshotRead(
         snapshot_id=snapshot_id,
         metadata=metadata,
@@ -193,8 +253,16 @@ def _read_verified_snapshot_side(
     *,
     expected_sha256: str | None,
     expected_size_bytes: int | None,
+    deliverable: bool,
 ) -> tuple[str | None, bool]:
-    """Verify one stored side, omitting valid binary or oversized content."""
+    """Verify one stored side, omitting valid binary or oversized content.
+
+    *deliverable* false omits the content for a reason outside this side's own
+    size — the response budget was already spent elsewhere. It suppresses the
+    body, never the verification: the stored bytes are still hashed and
+    checked against the metadata, so a corrupt snapshot is still caught on a
+    read that happens not to return it.
+    """
     try:
         target = contained_path(contained_path(snapshot_dir, side), target_path)
     except PathSafetyError:
@@ -217,7 +285,8 @@ def _read_verified_snapshot_side(
         if target.stat().st_size != expected_size_bytes:
             raise _snapshot_integrity_error(snapshot_id, side)
         digest = hashlib.sha256()
-        response_bytes = bytearray() if expected_size_bytes <= MAX_SNAPSHOT_TEXT_BYTES else None
+        wanted = deliverable and expected_size_bytes <= MAX_SNAPSHOT_TEXT_BYTES
+        response_bytes = bytearray() if wanted else None
         total_bytes = 0
         with target.open("rb") as stream:
             while chunk := stream.read(_SNAPSHOT_HASH_CHUNK_BYTES):
@@ -246,12 +315,18 @@ def _read_verified_snapshot_side(
 def _read_bounded_snapshot_diff(
     snapshot_dir: Path,
     snapshot_id: str,
+    budget: ResponseBudget,
 ) -> tuple[str, bool]:
     """Read a diff with a hard byte cap and explicit omission state."""
     try:
         diff_file = contained_path(snapshot_dir, "diff.patch")
         if not diff_file.is_file():
             return "", False
+        # Charged from the stat first: a diff that does not fit the response
+        # is never read. Unlike the stored sides there is nothing to verify
+        # here, so skipping the read costs no integrity checking.
+        if not budget.try_charge(min(diff_file.stat().st_size, MAX_SNAPSHOT_DIFF_BYTES + 1)):
+            return "", True
         with diff_file.open("rb") as stream:
             raw = stream.read(MAX_SNAPSHOT_DIFF_BYTES + 1)
     except (OSError, PathSafetyError):

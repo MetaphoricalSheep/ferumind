@@ -160,6 +160,26 @@ class RenditionTooLargeError(FileTooLargeError):
     """
 
 
+class ResponseTooLargeError(FerumindError):
+    """Raised when an assembled result provably cannot reach the caller.
+
+    Distinct from ``FILE_TOO_LARGE``, which is about one file measured
+    against a file ceiling. This one is about a *response* measured against
+    the caller's transport ceiling, and the contributor named in ``details``
+    may be an aggregate — every ``rules/*.md`` in a workspace, say — rather
+    than a single oversized file.
+
+    Raising is deliberate, and the alternative is worse than the error: a
+    reply the transport rejects can tear down the connection carrying it and
+    leave the server unreachable for every later call. Truncating instead is
+    not available on these surfaces — ``read_document``'s ``document_sha256``
+    has to describe the whole file for hash-guarded edits to be safe, and
+    ``get_context`` must never silently drop a rule (spec-mcp §4).
+    """
+
+    code: ClassVar[str] = "RESPONSE_TOO_LARGE"
+
+
 class UploadIncompleteError(FerumindError):
     """Raised when finalizing a chunked upload with missing chunks."""
 
@@ -322,6 +342,7 @@ ERROR_CODES: Final[tuple[str, ...]] = (
     "FILE_NOT_FOUND",
     "UNSUPPORTED_FILE_TYPE",
     "FILE_TOO_LARGE",
+    "RESPONSE_TOO_LARGE",
     "UPLOAD_INCOMPLETE",
     "CONTENT_HASH_MISMATCH",
     "UNSAFE_URL",

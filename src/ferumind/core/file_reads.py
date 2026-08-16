@@ -48,6 +48,7 @@ from ferumind.core.renditions import (
     ImageRendition,
     render_image_bytes,
 )
+from ferumind.core.response_limits import assert_blob_is_deliverable
 from ferumind.core.types import StrictModel
 from ferumind.core.write_limits import MAX_UPLOAD_BYTES
 
@@ -58,7 +59,7 @@ from ferumind.core.write_limits import MAX_UPLOAD_BYTES
 #: This is *not* the effective ``resources/read`` limit. A response also has
 #: to survive the caller's transport, which is narrower and configurable
 #: (``Config.max_resource_response_bytes``); see
-#: ``_assert_resource_is_deliverable`` below. A 20 MB original passes here
+#: ``response_limits.assert_blob_is_deliverable``. A 20 MB original passes here
 #: and is still correctly refused as undeliverable over a 10 MiB tunnel.
 MAX_RESOURCE_READ_BYTES: Final = MAX_UPLOAD_BYTES
 
@@ -326,50 +327,6 @@ def read_file_for_context(
     )
 
 
-#: Base64 inflates a blob by 4/3. A resource whose encoded form would exceed
-#: the transport ceiling is refused rather than truncated.
-_BASE64_INFLATION_NUMERATOR: Final = 4
-_BASE64_INFLATION_DENOMINATOR: Final = 3
-
-
-def _assert_resource_is_deliverable(size_bytes: int, max_response_bytes: int | None) -> None:
-    """Refuse an original that the caller's transport provably cannot carry.
-
-    Checked against the stat size *before* the file is read, so an oversized
-    resource costs nothing to reject and never has to be held in memory.
-
-    This is a hard refusal on purpose. ``resources/read`` promises the exact
-    original, so silently truncating would break that contract; and emitting
-    an oversized reply is worse than useless, because a transport that
-    rejects the response body can tear down the connection carrying it and
-    leave the server unreachable for every later call.
-    """
-    if max_response_bytes is None:
-        return
-    encoded_estimate = (size_bytes * _BASE64_INFLATION_NUMERATOR) // _BASE64_INFLATION_DENOMINATOR
-    if encoded_estimate <= max_response_bytes:
-        return
-    usable = (max_response_bytes * _BASE64_INFLATION_DENOMINATOR) // _BASE64_INFLATION_NUMERATOR
-    raise FileTooLargeError(
-        "This file is too large to return as a resource. Its base64-encoded "
-        f"form would be about {encoded_estimate} bytes, over the "
-        f"{max_response_bytes}-byte transport limit. Use read_file for a "
-        "bounded rendition or text slice of the same file; that is the "
-        "supported way to get this content into context.",
-        details={
-            "size_bytes": size_bytes,
-            "encoded_estimate_bytes": encoded_estimate,
-            "max_response_bytes": max_response_bytes,
-            "max_original_bytes": usable,
-            "recommended_tool": "read_file",
-            "recommended_action": (
-                "Call read_file with this path for an image rendition or a "
-                "bounded text slice. The original stays on disk untouched."
-            ),
-        },
-    )
-
-
 def read_file_resource(
     workspace: WorkspaceRoot,
     project_key: str,
@@ -386,7 +343,7 @@ def read_file_resource(
     ``read_file``.
     """
     resolved = resolve_project_file(workspace, project_key, path)
-    _assert_resource_is_deliverable(resolved.size_bytes, max_response_bytes)
+    assert_blob_is_deliverable(resolved.size_bytes, max_response_bytes)
     raw = read_regular_file_bytes(resolved.absolute)
     if resolved.context_support == "text":
         try:

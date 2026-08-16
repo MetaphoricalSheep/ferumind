@@ -185,6 +185,9 @@ Rules:
   can return many rows per document — so repeating a description per row
   multiplies payload for no navigation gain.
 - **Uncapped to start, observed** (decision 11 Jul): no truncation anywhere.
+  Unchanged by the deliverability guard below, which caps nothing: a payload
+  that fits the caller's transport is assembled exactly as this section
+  describes, with every rule present.
   The server records `rules_bytes`, `spine_bytes`, `documents_count`,
   `descriptions_bytes`, and total result bytes in the observation log on
   every `get_context` call, and the same numbers are echoed in the `payload`
@@ -192,6 +195,17 @@ Rules:
   separately because descriptions are a per-document cost paid on every
   contract call, and the `MAX_DESCRIPTION_CHARS` bound is a guess until this
   number says otherwise. A cap is a later decision made from this data.
+- **Deliverability is not a cap.** A response over the caller's transport
+  ceiling (`Config.max_resource_response_bytes`, default 10 MiB — the OpenAI
+  tunnel control-plane limit) is rejected with HTTP 413, and that rejection
+  kills the stdio child: the call does not fail slowly, the transport dies
+  and takes every later call with it. `get_context` is the call the bootstrap
+  instructs every chat to make first, so an undeliverable payload kills every
+  chat in the project rather than one. It therefore **refuses** —
+  `RESPONSE_TOO_LARGE` (§7), naming the contributor that broke the budget and
+  what to do about it — rather than emitting a reply that cannot arrive. It
+  never truncates, never pages, and never drops a rule; the refusal is
+  measured before the offending file is read.
 
 ## 5. Tool inventory
 
@@ -914,6 +928,19 @@ an image over the decodable-pixel ceiling — `details` carries
 `size_bytes`/`limit_bytes` (or `max_pixels`) so the caller can tell which.
 `VALIDATION_ERROR` covers an undecodable image, a directory or special
 file, and a malformed or non-canonical `ferumind://` URI.
+
+New (read surfaces): `RESPONSE_TOO_LARGE` — an assembled result provably
+could not reach the caller over `Config.max_resource_response_bytes`, so it
+was refused before it was emitted rather than after the transport rejected it
+(§4). Raised by `get_context` and `read_document`. Deliberately distinct from
+`FILE_TOO_LARGE`, which measures one file against a file ceiling: this
+measures a *response* against a transport ceiling, and the contributor named
+in `details.source` may be an aggregate — every `rules/*.md` in a workspace,
+say. `details` carries `source`, `source_bytes`, `estimated_response_bytes`,
+`max_response_bytes`, and a `recommended_action` naming the bounded call or
+operator fix. `read_snapshot` does not raise it: its result already carries
+per-component `*_omitted` flags, so it omits the components that do not fit
+(diff, then before, then after) and stays useful.
 
 **Errors on `resources/read` have no Ferumind envelope.** The MCP resource
 protocol carries only a JSON-RPC error, so the machine-readable code rides

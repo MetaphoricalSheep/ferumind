@@ -45,6 +45,7 @@ reverse. See [product/spec-versioning.md](product/spec-versioning.md) §0.1.
 │  lifecycle_writes  │  project_writes                  │
 │  skills  │  compacts  │  lint  │  verify_index        │
 │  files  │  file_reads  │  images  │  renditions       │
+│  response_limits                                     │
 │  observations  │  diagnostics  │  runtime events        │
 └─────────────────────────────────────────────────────┘
 ```
@@ -57,6 +58,13 @@ The write domain is five modules, not one: guarded propose → apply in
 in `upload_writes`, archive/restore in `lifecycle_writes`, and project
 creation in `project_writes`. `write_common` holds the guards they share and
 `write_limits` the bounds; both are leaves. There is no `core/writes.py`.
+
+`response_limits` is the read-side counterpart and also a leaf: what the
+caller's transport will carry, spent as a `ResponseBudget` across the parts
+of one result. It is a deliverability guard, not a cap — `get_context` stays
+uncapped by the product contract, and nothing in that module truncates. A
+response that provably cannot arrive is refused before it is emitted, because
+the relay answers an oversized body with a 413 that kills the stdio child.
 
 There is no workers layer. The filesystem watcher and backup worker were
 removed: out-of-band edits are covered by reconcile-on-read, and no background

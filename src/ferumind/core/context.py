@@ -16,6 +16,7 @@ from ferumind.core.format import read_format
 from ferumind.core.paths import PathSafetyError, WorkspaceRoot, contained_path
 from ferumind.core.reconcile import reconcile_project
 from ferumind.core.registry import ProjectEntry
+from ferumind.core.response_limits import ResponseBudget
 from ferumind.core.skills import list_skills
 from ferumind.core.types import DbConnection
 
@@ -110,8 +111,19 @@ class ProjectContext(BaseModel):
     payload: ContextPayload
 
 
-def _collect_rules(workspace_root: WorkspaceRoot, project_key: str) -> ContextRules:
-    """Concatenate workspace then project rules, each prefixed by a source header."""
+def _collect_rules(
+    workspace_root: WorkspaceRoot,
+    project_key: str,
+    budget: ResponseBudget,
+) -> ContextRules:
+    """Concatenate workspace then project rules, each prefixed by a source header.
+
+    Charged file by file from the stat, before any of them is read. Rules are
+    the one part of this payload with no bound of its own — ``rules/`` is a
+    creatable folder, each document may reach the 5 MiB write cap, and nothing
+    limits how many there are, so repeated small appends can grow the set past
+    any transport ceiling using individually tiny tool calls.
+    """
     parts: list[str] = []
     sources: list[str] = []
     rule_dirs = [
@@ -132,26 +144,75 @@ def _collect_rules(workspace_root: WorkspaceRoot, project_key: str) -> ContextRu
             except PathSafetyError:
                 continue
             source = f"{prefix}/{entry.name}"
+            budget.charge(
+                safe_entry.stat().st_size,
+                source=f"the rules document {source}",
+                remedy=(
+                    "Rules are never truncated, so this project cannot start a "
+                    "chat until the rules shrink. Split or trim the files under "
+                    "rules/, or move reference material into a canvas the agent "
+                    "reads on demand."
+                ),
+            )
             sources.append(source)
             parts.append(f"## {source}\n\n{safe_entry.read_text(encoding='utf-8').strip()}\n")
     return ContextRules(content_markdown="\n".join(parts), sources=sources)
+
+
+def _map_bytes(documents: list[ContextDocument]) -> int:
+    """Measure what the document map costs on the wire, fields included."""
+    return sum(
+        len(
+            (
+                f"{doc.path}{doc.title}{doc.description}{doc.folder}"
+                f"{doc.status}{doc.edit_policy}{doc.updated}"
+            ).encode()
+        )
+        for doc in documents
+    )
 
 
 def build_context(
     conn: DbConnection,
     workspace_root: WorkspaceRoot,
     entry: ProjectEntry,
+    *,
+    max_response_bytes: int | None = None,
 ) -> ProjectContext:
-    """Assemble the full context payload for a project."""
+    """Assemble the full context payload for a project.
+
+    *max_response_bytes* does **not** cap the payload. Uncapped is a locked
+    product decision (spec-mcp §4) and stands: nothing here truncates, pages,
+    or drops a rule. What it does is refuse, with a machine-readable error
+    naming the contributor, when the assembled result provably could not
+    reach the caller anyway.
+
+    The distinction matters most on this call. ``get_context`` is the one the
+    bootstrap instructs every new chat to make first, so a payload past the
+    transport ceiling does not degrade one call — every chat in the project
+    dies on its first, and on a tunnel takes the transport down with it. An
+    error that names the offending rules document is the difference between
+    an operator who knows to split a file and an operator filing a bug about
+    a connection that keeps dropping.
+    """
     project_key = entry.key
     reconcile_project(conn, workspace_root, project_key)
 
-    rules = _collect_rules(workspace_root, project_key)
+    budget = ResponseBudget(max_response_bytes, surface="get_context")
+    rules = _collect_rules(workspace_root, project_key, budget)
 
     spine: ContextSpine | None = None
     project_root = contained_path(workspace_root, f"projects/{project_key}")
     spine_path = contained_path(project_root, SPINE_FILENAME)
     if spine_path.is_file():
+        budget.charge(
+            spine_path.stat().st_size,
+            source=f"the spine {SPINE_FILENAME}",
+            remedy=(
+                "The spine is served whole on every contract call. Move detail "
+                "out of it into canvases and leave the spine as the map."
+            ),
+        )
         spine_content = spine_path.read_text(encoding="utf-8")
         spine = ContextSpine(
             path=SPINE_FILENAME,
@@ -210,6 +271,21 @@ def build_context(
             len(f"{skill.name}{skill.description}{skill.path}".encode()) for skill in skills
         ),
         descriptions_bytes=sum(len(doc.description.encode("utf-8")) for doc in documents),
+    )
+
+    # The map and the skills index are charged last, together, because
+    # neither is a file the operator can point at: they are per-row costs
+    # that grow with how many documents a project has. Descriptions are
+    # bounded per document by MAX_DESCRIPTION_CHARS, the row count is not,
+    # so this is the contributor that arrives without anyone adding anything
+    # large.
+    budget.charge(
+        _map_bytes(documents) + payload.skills_bytes,
+        source=f"the document map ({len(documents)} documents) and the skills index",
+        remedy=(
+            "Archive documents that are no longer live, or split the project. "
+            "Everything under archive/ is already excluded from this map."
+        ),
     )
 
     return ProjectContext(

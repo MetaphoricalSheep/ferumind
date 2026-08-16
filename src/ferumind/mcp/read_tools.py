@@ -52,6 +52,7 @@ from ferumind.mcp.result_models import (
 )
 from ferumind.mcp.tool_context import (
     error_result,
+    require_config,
     require_database,
     require_format_gate,
     require_workspace,
@@ -90,7 +91,12 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
             with acquire_project_lock(project_root, entry.key):
                 conn = db.get_connection()
                 try:
-                    context = build_context(conn, require_workspace(), entry)
+                    context = build_context(
+                        conn,
+                        require_workspace(),
+                        entry,
+                        max_response_bytes=require_config().max_resource_response_bytes,
+                    )
                 finally:
                     conn.close()
             return make_success(dump_model(context), project=entry.key)
@@ -125,6 +131,11 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
                         require_workspace(),
                         entry.key,
                         path,
+                        # The only read_project_document call site that serves
+                        # the whole body back. The map, range, and find tools
+                        # below build bounded results from the same read and
+                        # stay available on a document too large for this one.
+                        max_response_bytes=require_config().max_resource_response_bytes,
                     )
                 finally:
                     conn.close()
@@ -535,7 +546,12 @@ def register_read_tools(mcp: ToolRegistrar) -> None:
             ws = require_workspace()
             project_dir = contained_project_root(ws, entry.key)
             with acquire_project_lock(project_dir, entry.key):
-                snapshot = read_project_snapshot(ws, entry.key, snapshot_id)
+                snapshot = read_project_snapshot(
+                    ws,
+                    entry.key,
+                    snapshot_id,
+                    max_response_bytes=require_config().max_resource_response_bytes,
+                )
             return make_success(dump_model(snapshot), project=entry.key)
         except (FerumindError, PathSafetyError) as exc:
             return error_result(exc, project=project)
