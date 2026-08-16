@@ -156,12 +156,16 @@ class RetentionPolicy(StrictModel):
     #: quiet project is never left with no recovery history at all.
     keep_recent_snapshots: int = Field(default=10, ge=0)
     #: Applied operations older than this keep every column but ``diff_text``.
-    diff_scrub_age_days: int = Field(default=90, ge=1)
+    #: Thirty rather than ninety: the diffs are the one store that reliably
+    #: holds reclaimable payload, and a ninety-day window on a workspace that
+    #: had existed for thirty-five days could never touch any of it.
+    diff_scrub_age_days: int = Field(default=30, ge=1)
     #: Spent proposal rows (expired/discarded/stale) older than this go.
     spent_proposal_max_age_days: int = Field(default=7, ge=1)
     #: Observation rows older than this go — the log is documented as
-    #: "recent MCP calls", which nothing else currently makes true.
-    observation_max_age_days: int = Field(default=90, ge=1)
+    #: "recent MCP calls", which nothing else currently makes true. Thirty
+    #: days is what "recent" is worth for metadata nobody reads twice.
+    observation_max_age_days: int = Field(default=30, ge=1)
     #: Migration backup tarballs to keep, newest first.
     keep_migration_backups: int = Field(default=2, ge=1)
     #: The private runtime log is rotated once it exceeds this size.
@@ -207,6 +211,12 @@ class StoreReclaim(StrictModel):
     store: str
     #: Project key, or ``None`` for workspace-level state.
     scope: str | None = None
+    #: Everything the store holds, whatever its age — never the post-cutoff
+    #: subset. A dry run's whole job is telling the operator what is there and
+    #: how much of it the current policy would take; counting only the expired
+    #: rows made the database stores report ``0 of 0`` over 2,411 retained
+    #: diffs and 7,236 observations, which reads as "nothing here" when the
+    #: truth is "a lot here, none of it old enough yet".
     examined: int = 0
     reclaimed: int = 0
     #: Bytes returned to the filesystem. Zero for database stores — those
@@ -215,6 +225,11 @@ class StoreReclaim(StrictModel):
     bytes_reclaimed: int = 0
     #: Bytes freed inside the database, realized by ``VACUUM``.
     database_bytes_freed: int = 0
+    #: Age in days of the oldest item still held, or ``None`` when the store
+    #: is empty or its items carry no usable date.
+    oldest_age_days: int | None = None
+    #: The retention window this store is judged against, in days.
+    window_days: int | None = None
 
 
 class PruneReport(StrictModel):
@@ -245,6 +260,44 @@ class PruneReport(StrictModel):
     @property
     def total_reclaimed(self) -> int:
         return sum(entry.reclaimed for entry in self.stores)
+
+    def by_store(self) -> list[StoreReclaim]:
+        """Collapse the per-project entries into one row per store.
+
+        Thirteen projects produce twenty-six snapshot and blob rows, which is
+        the detail ``--verbose`` exists for. The summary an operator reads
+        first should be one line per kind of thing — and it must include the
+        stores holding data that no window has caught yet, because "0 of 2411"
+        is the number that tells them whether a shorter window is worth
+        passing. Order follows first appearance, so the reading order is the
+        order prune works in.
+        """
+        totals: dict[str, StoreReclaim] = {}
+        for entry in self.stores:
+            running = totals.get(entry.store)
+            totals[entry.store] = StoreReclaim(
+                store=entry.store,
+                examined=entry.examined + (running.examined if running else 0),
+                reclaimed=entry.reclaimed + (running.reclaimed if running else 0),
+                bytes_reclaimed=entry.bytes_reclaimed + (running.bytes_reclaimed if running else 0),
+                database_bytes_freed=entry.database_bytes_freed
+                + (running.database_bytes_freed if running else 0),
+                # The oldest thing across every project, and the window they
+                # all share — a per-project split would say nothing here.
+                oldest_age_days=max(
+                    (
+                        age
+                        for age in (
+                            entry.oldest_age_days,
+                            running.oldest_age_days if running else None,
+                        )
+                        if age is not None
+                    ),
+                    default=None,
+                ),
+                window_days=entry.window_days or (running.window_days if running else None),
+            )
+        return list(totals.values())
 
 
 @dataclass(frozen=True)
@@ -404,27 +457,29 @@ def _prune_snapshot_directories(
     follows needs it: on a dry run it is the only way to say what removing
     these directories would let the sweep free.
     """
-    doomed = _expired_snapshots(context, base)
+    dated = _dated_snapshots(base)
+    doomed = _expired_snapshots(context, dated)
     census = _census(doomed)
     reclaim = StoreReclaim(
         store=store,
         scope=scope,
-        examined=len(_dated_snapshots(base)),
+        examined=len(dated),
         reclaimed=len(doomed),
         bytes_reclaimed=census.direct_bytes,
+        oldest_age_days=_age_days(context, dated[-1].taken_at if dated else None),
+        window_days=context.policy.snapshot_max_age_days,
     )
     if not context.dry_run:
         _remove_snapshots(context, doomed)
     return reclaim, census
 
 
-def _expired_snapshots(context: _Context, base: Path | None) -> list[_DatedSnapshot]:
+def _expired_snapshots(context: _Context, dated: list[_DatedSnapshot]) -> list[_DatedSnapshot]:
     """Select the snapshots past the age window, newest-first floor applied.
 
     The floor comes off the top before the window is consulted, so a project
     whose every snapshot predates the window still keeps its most recent ones.
     """
-    dated = _dated_snapshots(base)
     cutoff = context.cutoff(context.policy.snapshot_max_age_days)
     keep = context.policy.keep_recent_snapshots
     return [entry for entry in dated[keep:] if entry.taken_at < cutoff]
@@ -662,31 +717,38 @@ def _scrub_applied_diffs(context: _Context, project: str | None) -> StoreReclaim
     was never pending and so never met that clause. This is that leak, closed
     after the fact rather than by deleting the record.
     """
-    cutoff = context.cutoff_iso(context.policy.diff_scrub_age_days)
-    where, params = _scoped(
-        "state = ? AND diff_text IS NOT NULL AND created_at < ?",
-        [OP_APPLIED, cutoff],
-        project,
-    )
+    held, params = _scoped("state = ? AND diff_text IS NOT NULL", [OP_APPLIED], project)
+    expired = f"{held} AND created_at < ?"
+    expired_params = [*params, context.cutoff_iso(context.policy.diff_scrub_age_days)]
+
+    # S608 here and below: every clause is assembled from module constants and
+    # the fixed ``_scoped`` suffix; all values stay bound parameters.
+    present = _count(context, f"SELECT COUNT(*) FROM operations WHERE {held}", params)  # noqa: S608
     row = context.conn.execute(
-        f"SELECT COUNT(*) AS n, "  # noqa: S608 - clause is a module constant; values stay bound
+        f"SELECT COUNT(*) AS n, "  # noqa: S608
         f"COALESCE(SUM(length(CAST(diff_text AS BLOB))), 0) AS bytes "
-        f"FROM operations WHERE {where}",
-        tuple(params),
+        f"FROM operations WHERE {expired}",
+        tuple(expired_params),
     ).fetchone()
     scrubbed, freed = int(row["n"]), int(row["bytes"])
     if not context.dry_run and scrubbed:
         context.conn.execute(
-            f"UPDATE operations SET diff_text = NULL WHERE {where}",  # noqa: S608 - as above
-            tuple(params),
+            f"UPDATE operations SET diff_text = NULL WHERE {expired}",  # noqa: S608
+            tuple(expired_params),
         )
         context.conn.commit()
     return StoreReclaim(
         store=STORE_OPERATION_DIFFS,
         scope=project,
-        examined=scrubbed,
+        examined=present,
         reclaimed=scrubbed,
         database_bytes_freed=freed,
+        oldest_age_days=_oldest_row_age(
+            context,
+            f"SELECT MIN(created_at) FROM operations WHERE {held}",  # noqa: S608
+            params,
+        ),
+        window_days=context.policy.diff_scrub_age_days,
     )
 
 
@@ -698,30 +760,62 @@ def _delete_spent_proposals(context: _Context, project: str | None) -> StoreRecl
     edit and did not make it. ``failed`` rows are kept: an attempted mutation
     that did not complete is worth being able to look up.
     """
-    cutoff = context.cutoff_iso(context.policy.spent_proposal_max_age_days)
     states = ",".join("?" for _ in _SPENT_PROPOSAL_STATES)
     types = ",".join("?" for _ in PROPOSAL_OP_TYPES)
-    where, params = _scoped(
-        f"state IN ({states}) AND operation_type IN ({types}) AND created_at < ?",
-        [*_SPENT_PROPOSAL_STATES, *sorted(PROPOSAL_OP_TYPES), cutoff],
+    held, params = _scoped(
+        f"state IN ({states}) AND operation_type IN ({types})",
+        [*_SPENT_PROPOSAL_STATES, *sorted(PROPOSAL_OP_TYPES)],
         project,
     )
+    expired = f"{held} AND created_at < ?"
+    expired_params = [*params, context.cutoff_iso(context.policy.spent_proposal_max_age_days)]
+
     # S608: both placeholder lists are built from closed module constants;
     # every value below remains a bound parameter.
-    row = context.conn.execute(
-        f"SELECT COUNT(*) AS n FROM operations WHERE {where}",  # noqa: S608
-        tuple(params),
-    ).fetchone()
-    doomed = int(row["n"])
+    present = _count(context, f"SELECT COUNT(*) FROM operations WHERE {held}", params)  # noqa: S608
+    doomed = _count(context, f"SELECT COUNT(*) FROM operations WHERE {expired}", expired_params)  # noqa: S608
     if not context.dry_run and doomed:
-        context.conn.execute(f"DELETE FROM operations WHERE {where}", tuple(params))  # noqa: S608
+        context.conn.execute(
+            f"DELETE FROM operations WHERE {expired}",  # noqa: S608
+            tuple(expired_params),
+        )
         context.conn.commit()
     return StoreReclaim(
         store=STORE_SPENT_PROPOSALS,
         scope=project,
-        examined=doomed,
+        examined=present,
         reclaimed=doomed,
+        oldest_age_days=_oldest_row_age(
+            context,
+            f"SELECT MIN(created_at) FROM operations WHERE {held}",  # noqa: S608
+            params,
+        ),
+        window_days=context.policy.spent_proposal_max_age_days,
     )
+
+
+def _age_days(context: _Context, moment: datetime | None) -> int | None:
+    """Return how many whole days ago *moment* was, or ``None``."""
+    if moment is None or moment.utcoffset() is None:
+        return None
+    return max(0, (context.now - moment).days)
+
+
+def _oldest_row_age(context: _Context, sql: str, params: list[object]) -> int | None:
+    """Return the age in days of the oldest ``created_at`` the query selects."""
+    row = context.conn.execute(sql, tuple(params)).fetchone()
+    stamp = None if row is None else row[0]
+    if not isinstance(stamp, str):
+        return None
+    try:
+        return _age_days(context, datetime.fromisoformat(stamp))
+    except ValueError:
+        return None
+
+
+def _count(context: _Context, sql: str, params: list[object]) -> int:
+    """Run a single-column COUNT and return it."""
+    return int(context.conn.execute(sql, tuple(params)).fetchone()[0])
 
 
 def _scoped(clause: str, params: list[object], project: str | None) -> tuple[str, list[object]]:
@@ -742,18 +836,25 @@ def _prune_observations(context: _Context) -> StoreReclaim:
     and the whole row goes.
     """
     cutoff = context.cutoff_iso(context.policy.observation_max_age_days)
-    row = context.conn.execute(
-        "SELECT COUNT(*) AS n FROM mcp_call_observations WHERE created_at < ?",
-        (cutoff,),
-    ).fetchone()
-    doomed = int(row["n"])
+    present = _count(context, "SELECT COUNT(*) FROM mcp_call_observations", [])
+    doomed = _count(
+        context, "SELECT COUNT(*) FROM mcp_call_observations WHERE created_at < ?", [cutoff]
+    )
     if not context.dry_run and doomed:
         context.conn.execute(
             "DELETE FROM mcp_call_observations WHERE created_at < ?",
             (cutoff,),
         )
         context.conn.commit()
-    return StoreReclaim(store=STORE_OBSERVATIONS, examined=doomed, reclaimed=doomed)
+    return StoreReclaim(
+        store=STORE_OBSERVATIONS,
+        examined=present,
+        reclaimed=doomed,
+        oldest_age_days=_oldest_row_age(
+            context, "SELECT MIN(created_at) FROM mcp_call_observations", []
+        ),
+        window_days=context.policy.observation_max_age_days,
+    )
 
 
 # ── Private runtime log ──────────────────────────────────────────────────────

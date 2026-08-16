@@ -692,7 +692,7 @@ class TestPrune:
 
         assert result.exit_code == 0, result.output
         assert "Nothing was deleted" in result.output
-        assert "snapshots (demo): 1 of 1" in result.output
+        assert "snapshots: 1 of 1" in result.output
         assert snapshot.is_dir()
 
     def test_apply_reclaims_and_says_what_it_took(
@@ -715,7 +715,7 @@ class TestPrune:
         )
 
         assert result.exit_code == 0, result.output
-        assert "snapshots (demo): 1 of 1" in result.output
+        assert "snapshots: 1 of 1" in result.output
         assert "after VACUUM" in result.output
         assert not snapshot.exists()
 

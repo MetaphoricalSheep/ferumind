@@ -27,7 +27,7 @@ if TYPE_CHECKING:  # imported for typing only; runtime imports stay function-loc
     from ferumind.core.images import ImagePolicy
     from ferumind.core.lint import LintReport
     from ferumind.core.paths import WorkspaceRoot
-    from ferumind.core.retention import PruneReport
+    from ferumind.core.retention import PruneReport, StoreReclaim
 
 app = typer.Typer(
     help="Ferumind — local-first, Markdown-backed knowledge workspace.",
@@ -602,16 +602,32 @@ def prune(
     _echo_prune_report(report, verbose=verbose)
 
 
+def _why_nothing(entry: StoreReclaim) -> str:
+    """Explain a store that holds things but is giving none of them up.
+
+    A column of zeros beside a store holding 2,411 rows reads as a broken
+    command. It is almost always the same cause — everything there is younger
+    than its window — and saying so turns the zero into an answer and points
+    at the flag that would change it.
+    """
+    if entry.reclaimed or not entry.examined:
+        return ""
+    if entry.oldest_age_days is None or entry.window_days is None:
+        return ""
+    return f" — oldest is {entry.oldest_age_days}d, window is {entry.window_days}d"
+
+
 def _echo_prune_report(report: PruneReport, *, verbose: bool) -> None:
     """Render the typed prune report without importing retention at startup."""
     verb = "Would reclaim" if report.dry_run else "Reclaimed"
-    for entry in report.stores:
-        if not verbose and not entry.reclaimed:
-            continue
+    # Every store is listed, including the ones with nothing to take: a store
+    # holding 2,411 rows that the window has not caught is exactly what the
+    # operator needs to see before deciding whether to shorten it.
+    for entry in report.stores if verbose else report.by_store():
         where = f"{entry.store} ({entry.scope})" if entry.scope else entry.store
         typer.echo(
             f"  {where}: {entry.reclaimed} of {entry.examined} "
-            f"({entry.bytes_reclaimed / 1048576:.1f} MB)"
+            f"({entry.bytes_reclaimed / 1048576:.1f} MB){_why_nothing(entry)}"
         )
     typer.echo(
         f"\n{verb} {report.total_reclaimed} item(s), "

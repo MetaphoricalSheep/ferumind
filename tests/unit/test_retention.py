@@ -772,8 +772,8 @@ class TestPolicy:
     def test_defaults_are_the_documented_local_ones(self) -> None:
         policy = RetentionPolicy()
         assert policy.snapshot_max_age_days == 180
-        assert policy.diff_scrub_age_days == 90
-        assert policy.observation_max_age_days == 90
+        assert policy.diff_scrub_age_days == 30
+        assert policy.observation_max_age_days == 30
         assert policy.keep_migration_backups == 2
         assert policy.runtime_log_max_bytes == 8 * 1024 * 1024
 
@@ -791,3 +791,184 @@ def test_no_mcp_tool_can_prune() -> None:
     assert not any(
         "retention" in path.read_text(encoding="utf-8") for path in mcp_dir.rglob("*.py")
     ), "core.retention must not be reachable from the MCP layer"
+
+
+class TestTheReportSaysWhatIsThere:
+    """``examined`` counts the whole store, not the slice past the cutoff.
+
+    The first live run reported ``operation_diffs: 0 of 0`` against 2,411
+    retained diffs and ``observations: 0 of 0`` against 7,236 rows, because
+    both counted only what the window had already caught. An operator reads
+    that as an empty store and stops asking whether a shorter window is worth
+    passing.
+    """
+
+    def test_retained_diffs_are_counted_even_when_none_expired(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
+    ) -> None:
+        for _ in range(3):
+            aged_operation(conn, project, age_days=1)
+
+        report = prune_workspace(conn, workspace)
+
+        entry = store(report, STORE_OPERATION_DIFFS)
+        assert entry.examined == 3, "the diffs are there and must be counted"
+        assert entry.reclaimed == 0, "none is past the window"
+
+    @pytest.mark.usefixtures("project")
+    def test_observations_are_counted_even_when_none_expired(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot
+    ) -> None:
+        for _ in range(4):
+            aged_observation(conn, age_days=1)
+
+        report = prune_workspace(conn, workspace)
+
+        entry = store(report, STORE_OBSERVATIONS)
+        assert entry.examined == 4
+        assert entry.reclaimed == 0
+
+    def test_spent_proposals_are_counted_even_when_none_expired(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
+    ) -> None:
+        aged_operation(
+            conn,
+            project,
+            age_days=1,
+            state=OP_DISCARDED,
+            operation_type="propose_exact_replace_patch",
+            diff_text=None,
+        )
+
+        report = prune_workspace(conn, workspace)
+
+        entry = store(report, STORE_SPENT_PROPOSALS)
+        assert entry.examined == 1
+        assert entry.reclaimed == 0
+
+    def test_the_split_between_held_and_taken_is_visible(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
+    ) -> None:
+        """The number that matters: how much of what is there would go."""
+        for _ in range(2):
+            aged_operation(conn, project, age_days=400)
+        for _ in range(5):
+            aged_operation(conn, project, age_days=1)
+
+        report = prune_workspace(conn, workspace)
+
+        entry = store(report, STORE_OPERATION_DIFFS)
+        assert (entry.examined, entry.reclaimed) == (7, 2)
+
+    def test_a_project_scoped_run_counts_only_that_project(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
+    ) -> None:
+        aged_operation(conn, project, age_days=1)
+        aged_operation(conn, "some-other-project", age_days=1)
+
+        report = prune_workspace(conn, workspace, project=project)
+
+        assert store(report, STORE_OPERATION_DIFFS).examined == 1
+
+
+class TestTheSummaryRollup:
+    """``by_store`` is what the default CLI view prints.
+
+    Thirteen projects make the per-project listing unreadable, and filtering
+    the empty rows out instead made the default view claim the workspace was
+    empty. Rolling up keeps every store visible in a handful of lines.
+    """
+
+    def test_projects_collapse_into_one_row_per_store(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str, project_root: Path
+    ) -> None:
+        aged_snapshot(conn, project_root, project, age_days=400)
+
+        report = prune_workspace(conn, workspace, policy=RetentionPolicy(keep_recent_snapshots=0))
+
+        names = [entry.store for entry in report.by_store()]
+        assert len(names) == len(set(names)), "each store appears once"
+        assert STORE_SNAPSHOTS in names
+
+    def test_counts_are_summed_not_dropped(self) -> None:
+        rolled = PruneReport(
+            dry_run=True,
+            policy=RetentionPolicy(),
+            stores=[
+                retention.StoreReclaim(
+                    store=STORE_SNAPSHOTS, scope="a", examined=10, reclaimed=2, bytes_reclaimed=100
+                ),
+                retention.StoreReclaim(
+                    store=STORE_SNAPSHOTS, scope="b", examined=5, reclaimed=1, bytes_reclaimed=50
+                ),
+            ],
+            projects=["a", "b"],
+            database_bytes_before=0,
+            database_bytes_after=0,
+            vacuumed=False,
+        ).by_store()
+
+        assert len(rolled) == 1
+        assert (rolled[0].examined, rolled[0].reclaimed, rolled[0].bytes_reclaimed) == (15, 3, 150)
+
+    def test_a_store_with_nothing_to_take_still_appears(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
+    ) -> None:
+        """The regression that made a full workspace read as an empty one."""
+        for _ in range(3):
+            aged_operation(conn, project, age_days=1)
+
+        rolled = {entry.store: entry for entry in prune_workspace(conn, workspace).by_store()}
+
+        assert rolled[STORE_OPERATION_DIFFS].reclaimed == 0
+        assert rolled[STORE_OPERATION_DIFFS].examined == 3
+
+
+class TestTheReportExplainsItself:
+    """A store holding rows it will not give up has to say why.
+
+    Three rounds of "it keeps saying there is nothing to prune" came down to
+    windows longer than the workspace was old. The report knows both numbers;
+    withholding them made a working command look broken.
+    """
+
+    def test_a_held_store_reports_its_oldest_item_and_its_window(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str
+    ) -> None:
+        aged_operation(conn, project, age_days=5)
+
+        entry = store(prune_workspace(conn, workspace), STORE_OPERATION_DIFFS)
+
+        assert entry.reclaimed == 0
+        assert entry.oldest_age_days == 5
+        assert entry.window_days == RetentionPolicy().diff_scrub_age_days
+
+    def test_snapshots_report_the_age_of_the_oldest_directory(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str, project_root: Path
+    ) -> None:
+        aged_snapshot(conn, project_root, project, age_days=3, content="newer\n")
+        aged_snapshot(conn, project_root, project, age_days=40, content="older\n")
+
+        entry = store(prune_workspace(conn, workspace), STORE_SNAPSHOTS, project)
+
+        assert entry.oldest_age_days == 40
+        assert entry.window_days == RetentionPolicy().snapshot_max_age_days
+
+    @pytest.mark.usefixtures("project")
+    def test_an_empty_store_claims_no_age(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot
+    ) -> None:
+        entry = store(prune_workspace(conn, workspace), STORE_OBSERVATIONS)
+
+        assert entry.examined == 0
+        assert entry.oldest_age_days is None
+
+    def test_the_rollup_keeps_the_oldest_across_projects(
+        self, conn: sqlite3.Connection, workspace: WorkspaceRoot, project: str, project_root: Path
+    ) -> None:
+        aged_snapshot(conn, project_root, project, age_days=12)
+
+        rolled = {e.store: e for e in prune_workspace(conn, workspace).by_store()}
+
+        assert rolled[STORE_SNAPSHOTS].oldest_age_days == 12
+        assert rolled[STORE_SNAPSHOTS].window_days == RetentionPolicy().snapshot_max_age_days
