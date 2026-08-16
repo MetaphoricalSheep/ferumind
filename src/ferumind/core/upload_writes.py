@@ -42,6 +42,7 @@ from typing import Final, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from ferumind.core import uploads as upload_staging
+from ferumind.core.blob_store import blob_store_root, link_into
 from ferumind.core.errors import (
     ContentHashMismatchError,
     DocumentExistsError,
@@ -56,7 +57,7 @@ from ferumind.core.errors import (
     UploadIncompleteError,
     ValidationError,
 )
-from ferumind.core.file_io import atomic_write_bytes, atomic_write_text
+from ferumind.core.file_io import atomic_write_text
 from ferumind.core.folders import folder_of
 from ferumind.core.images import ImagePolicy, compress_image_for_storage
 from ferumind.core.locks import acquire_project_lock
@@ -301,7 +302,7 @@ def _write_uploaded_file(
             )
 
         snapshot_id = new_snapshot_id()
-        snapshot_dir = create_upload_snapshot(
+        upload_snapshot = create_upload_snapshot(
             project_dir,
             project_key=project_key,
             content_path=doc_rel,
@@ -311,10 +312,18 @@ def _write_uploaded_file(
             reason=operation_type,
             snapshot_id=snapshot_id,
         )
+        snapshot_dir = upload_snapshot.snapshot_dir
 
         files_published = False
         try:
-            atomic_write_bytes(target_file, raw)
+            # The snapshot already stored these bytes. Linking the blob here
+            # rather than writing them again is what makes an upload cost its
+            # size once instead of twice.
+            link_into(
+                blob_store_root(project_dir),
+                upload_snapshot.content_ref,
+                target_file,
+            )
             atomic_write_text(metadata_file, metadata_text)
             files_published = True
             record_snapshot_in_db(

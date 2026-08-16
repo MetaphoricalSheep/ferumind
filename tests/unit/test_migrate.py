@@ -11,12 +11,19 @@ from pathlib import Path
 import pytest
 
 from ferumind.core import migrate as migrate_module
+from ferumind.core.blob_store import blob_store_root, link_into, store_bytes
 from ferumind.core.errors import FormatUnsupportedError, MigrationPrerequisiteError
 from ferumind.core.format import SUPPORTED_FORMAT, read_format, write_format_marker
 from ferumind.core.indexer import IndexResult
-from ferumind.core.migrate import MIGRATORS, PREFLIGHTS, plan_migration, run_migration
+from ferumind.core.migrate import (
+    MIGRATORS,
+    PREFLIGHTS,
+    create_backup_tarball,
+    plan_migration,
+    run_migration,
+)
 from ferumind.core.operations import list_operations
-from ferumind.core.paths import PathSafetyError, WorkspaceRoot
+from ferumind.core.paths import PathSafetyError, WorkspaceRoot, contained_project_root
 
 
 def test_migration_registries_are_empty_between_format_bumps() -> None:
@@ -617,3 +624,34 @@ def test_migration_refuses_workspace_root_as_backup_directory(
             migrators={1: lambda _ws: None},
             backup_dir=workspace,
         )
+
+
+def test_backup_archives_shared_payloads_as_hardlinks(
+    conn: sqlite3.Connection,
+    workspace: WorkspaceRoot,
+    project: str,
+) -> None:
+    """STORE-01 risk 3: the backup should shrink, not double what it stored.
+
+    ``tarfile`` emits a second reference to an inode it has already archived
+    as a link member rather than a second copy of the payload — asserted here
+    rather than assumed, since the whole space saving would otherwise come
+    back at backup time.
+    """
+    project_root = contained_project_root(workspace, project)
+    store = blob_store_root(project_root)
+    payload = b"a payload held by more than one name\n" * 64
+    ref = store_bytes(store, payload)
+    link_into(store, ref, project_root / "library" / "payload.bin")
+
+    backup_path = create_backup_tarball(conn, workspace, workspace / ".ferumind/test-backups")
+
+    with tarfile.open(backup_path) as archive:
+        members = {member.name: member for member in archive.getmembers()}
+    payload_members = [
+        member for name, member in members.items() if name.endswith("/library/payload.bin")
+    ]
+    assert payload_members
+    linked = [member for member in members.values() if member.islnk()]
+    assert linked, "the shared payload was archived twice instead of as a hardlink"
+    assert all(member.size in (0, len(payload)) for member in payload_members)

@@ -23,6 +23,7 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from ferumind.core.blob_store import blob_store_root, link_into
 from ferumind.core.file_io import atomic_write_bytes, atomic_write_text
 from ferumind.core.images import ImagePolicy, compress_image_for_storage
 from ferumind.core.locks import acquire_project_lock
@@ -286,7 +287,7 @@ def _apply_one(
     )
 
     snapshot_id = new_snapshot_id()
-    snapshot_dir = create_binary_replacement_snapshot(
+    replacement = create_binary_replacement_snapshot(
         project_root,
         project_key=project_key,
         content_path=rel,
@@ -298,9 +299,12 @@ def _apply_one(
         metadata_before_text=sidecar_before,
         metadata_after_text=sidecar_after,
     )
+    snapshot_dir = replacement.snapshot_dir
 
     try:
-        atomic_write_bytes(absolute, new_bytes)
+        # The snapshot stored these bytes a moment ago; link them here rather
+        # than writing a third copy of the same image.
+        link_into(blob_store_root(project_root), replacement.after_ref, absolute)
         if sidecar_after is not None:
             atomic_write_text(sidecar, sidecar_after)
         record_snapshot_in_db(
@@ -334,6 +338,11 @@ def _apply_one(
         conn.commit()
     except BaseException:
         conn.rollback()
+        # Deliberately a plain write rather than a link back to the ``before``
+        # blob: this path runs when something has already gone wrong, and it
+        # restores from bytes held in memory instead of depending on the store
+        # it is recovering from. The rename breaks the link to the ``after``
+        # blob, which is exactly what returning the original requires.
         atomic_write_bytes(absolute, raw)
         if sidecar_before is not None:
             atomic_write_text(sidecar, sidecar_before)

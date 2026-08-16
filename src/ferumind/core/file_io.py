@@ -25,12 +25,18 @@ from __future__ import annotations
 
 import contextlib
 import errno
+import hashlib
 import os
 import secrets
 import stat
 from pathlib import Path
 
 from ferumind.core.paths import PathSafetyError
+
+#: Read size for streaming digests. Large enough that the syscall overhead
+#: disappears, small enough that hashing a 4 GiB photograph does not need
+#: 4 GiB of memory.
+DIGEST_CHUNK_BYTES = 1024 * 1024
 
 
 def ensure_private_directory(path: Path) -> None:
@@ -97,6 +103,32 @@ def read_regular_file_bytes(target: Path) -> bytes:
         return handle.read()
 
 
+def sha256_regular_file(target: Path) -> tuple[str, int]:
+    """Return *target*'s SHA-256 digest and byte count, read in bounded chunks.
+
+    Same descriptor discipline as :func:`read_regular_file_bytes` — no symlink
+    at the final component, and the regular-file check runs against ``fstat``
+    of the opened descriptor — but without holding the whole payload in
+    memory, since the caller wants an identity rather than the bytes.
+    """
+    fd = _open_no_follow(target)
+    try:
+        status = os.fstat(fd)
+        if not stat.S_ISREG(status.st_mode):
+            msg = f"Not a regular file: {target}"
+            raise PathSafetyError(msg)
+    except BaseException:
+        os.close(fd)
+        raise
+    digest = hashlib.sha256()
+    size_bytes = 0
+    with os.fdopen(fd, "rb") as handle:
+        while chunk := handle.read(DIGEST_CHUNK_BYTES):
+            digest.update(chunk)
+            size_bytes += len(chunk)
+    return digest.hexdigest(), size_bytes
+
+
 def atomic_write_text(target: Path, content: str) -> None:
     """Replace *target* atomically with UTF-8 text and fsync the payload."""
     _atomic_write(target, content.encode("utf-8"))
@@ -107,7 +139,7 @@ def atomic_write_bytes(target: Path, data: bytes) -> None:
     _atomic_write(target, data)
 
 
-def _existing_file_mode(name: str, directory_fd: int) -> int | None:
+def existing_regular_file_mode(name: str, directory_fd: int) -> int | None:
     """Return *name*'s mode when it is an existing regular file, else ``None``.
 
     ``lstat`` rather than ``stat``: a replace swaps the name itself, so the
@@ -140,7 +172,7 @@ def _atomic_write(target: Path, data: bytes) -> None:
     # component is covered by O_EXCL and the descriptor-relative rename.
     directory_fd = os.open(target.parent, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
     try:
-        preserved_mode = _existing_file_mode(target.name, directory_fd)
+        preserved_mode = existing_regular_file_mode(target.name, directory_fd)
         # A private random name rather than mkstemp, which resolves its ``dir``
         # argument as a path and would reintroduce the race this descriptor
         # closes. O_EXCL makes a collision an error, never a silent reuse.

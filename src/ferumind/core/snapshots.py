@@ -6,6 +6,11 @@ snapshot-protected, logged, scoped, and indexed. Snapshot directories live
 under ``projects/<key>/.ferumind/snapshots/`` (per-file snapshots) and
 ``workspace/.ferumind/global-snapshots/`` (workspace-scoped snapshots such as
 project creation and migration).
+
+Payloads are written through :mod:`ferumind.core.blob_store`, so a snapshot
+file and the bytes it snapshots share one inode instead of costing their size
+twice. The snapshot layout is unchanged by that: every payload is still a
+real file at its usual path, and every reader below is untouched.
 """
 
 from __future__ import annotations
@@ -17,6 +22,7 @@ import shutil
 import uuid
 from collections.abc import Generator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
@@ -24,11 +30,34 @@ from typing import cast
 from pydantic import BaseModel, ConfigDict
 from pydantic_core import ValidationError as PydanticValidationError
 
-from ferumind.core.file_io import atomic_write_bytes, atomic_write_text
+from ferumind.core.blob_store import BlobRef, blob_store_root, link_into, store_bytes
+from ferumind.core.file_io import atomic_write_text
 from ferumind.core.paths import PathSafetyError, contained_path
 from ferumind.core.types import DbConnection, JsonObject
 
 MAX_SNAPSHOT_METADATA_BYTES = 64 * 1024
+
+
+@dataclass(frozen=True)
+class UploadSnapshot:
+    """A published upload snapshot and the blob holding its payload.
+
+    The caller publishes the same bytes to ``library/`` immediately
+    afterwards, so it is handed the reference rather than the payload: one
+    link instead of a second full copy of the file that was just stored.
+    """
+
+    snapshot_dir: Path
+    content_ref: BlobRef
+
+
+@dataclass(frozen=True)
+class BinaryReplacementSnapshot:
+    """A published replacement snapshot and the blob holding its new bytes."""
+
+    snapshot_dir: Path
+    before_ref: BlobRef
+    after_ref: BlobRef
 
 
 class SnapshotInfo(BaseModel):
@@ -127,17 +156,20 @@ def create_snapshot(
     snapshots_base = contained_path(project_dir, ".ferumind/snapshots")
     _private_directory(snapshots_base)
     snapshot_dir = contained_path(snapshots_base, f"{ts}-{snapshot_id}")
+    store_root = blob_store_root(project_dir)
     with _snapshot_construction(snapshot_dir):
         before_dir = snapshot_dir / "before"
         after_dir = snapshot_dir / "after"
 
         if before_content is not None:
             _private_directory(before_dir)
-            _write_snapshot_file(before_dir, target_path or "", before_content)
+            _write_snapshot_file(
+                before_dir, target_path or "", before_content, store_root=store_root
+            )
 
         if after_content is not None:
             _private_directory(after_dir)
-            _write_snapshot_file(after_dir, target_path or "", after_content)
+            _write_snapshot_file(after_dir, target_path or "", after_content, store_root=store_root)
 
         diff = _generate_diff(before_content, after_content, target_path)
         atomic_write_text(contained_path(snapshot_dir, "diff.patch"), diff)
@@ -199,13 +231,14 @@ def create_global_snapshot(
     snapshot_base = contained_path(workspace_root, ".ferumind/global-snapshots")
     _private_directory(snapshot_base)
     snapshot_dir = contained_path(snapshot_base, f"{ts}-{snapshot_id}")
+    store_root = blob_store_root(workspace_root)
     with _snapshot_construction(snapshot_dir):
         before_dir = snapshot_dir / "before"
         after_dir = snapshot_dir / "after"
         for rel_path, content in before_files.items():
-            _write_snapshot_file(before_dir, rel_path, content)
+            _write_snapshot_file(before_dir, rel_path, content, store_root=store_root)
         for rel_path, content in after_files.items():
-            _write_snapshot_file(after_dir, rel_path, content)
+            _write_snapshot_file(after_dir, rel_path, content, store_root=store_root)
 
         diff_parts: list[str] = []
         for rel_path in sorted(set(before_files) | set(after_files)):
@@ -240,24 +273,30 @@ def create_upload_snapshot(
     metadata_text: str,
     reason: str,
     snapshot_id: str,
-) -> Path:
+) -> UploadSnapshot:
     """Snapshot a new binary upload plus its metadata sidecar together.
 
     Both files are new (there is no ``before``), so only ``after/`` is
     populated. The diff file records a byte-count note instead of a text
     diff, since the content file is not text.
+
+    Returns the payload's blob reference beside the snapshot directory: the
+    caller is about to publish those same bytes under ``library/``, and
+    linking the blob there costs nothing where writing them again costs the
+    upload's full size a second time.
     """
     now = datetime.now(UTC)
     ts = now.strftime("%Y%m%dT%H%M%S")
     snapshots_base = contained_path(project_dir, ".ferumind/snapshots")
     _private_directory(snapshots_base)
     snapshot_dir = contained_path(snapshots_base, f"{ts}-{snapshot_id}")
+    store_root = blob_store_root(project_dir)
     with _snapshot_construction(snapshot_dir):
         after_dir = snapshot_dir / "after"
 
         content_target = contained_path(after_dir, content_path)
         _private_directory(content_target.parent)
-        atomic_write_bytes(content_target, content_bytes)
+        content_ref = _publish_payload(store_root, content_bytes, content_target)
 
         metadata_target = contained_path(after_dir, metadata_path)
         _private_directory(metadata_target.parent)
@@ -284,7 +323,7 @@ def create_upload_snapshot(
             metadata.model_dump_json(indent=2),
         )
 
-    return snapshot_dir
+    return UploadSnapshot(snapshot_dir=snapshot_dir, content_ref=content_ref)
 
 
 def create_binary_replacement_snapshot(
@@ -299,7 +338,7 @@ def create_binary_replacement_snapshot(
     metadata_path: str | None = None,
     metadata_before_text: str | None = None,
     metadata_after_text: str | None = None,
-) -> Path:
+) -> BinaryReplacementSnapshot:
     """Snapshot an in-place rewrite of a binary file, before and after.
 
     Unlike :func:`create_upload_snapshot`, which records a file that did not
@@ -310,17 +349,24 @@ def create_binary_replacement_snapshot(
 
     The sidecar is included when supplied so a restore returns the file and
     the metadata describing it to a consistent pair.
+
+    Returns both blob references. ``before_bytes`` normally lands on the blob
+    the live file already shares, so capturing it costs nothing; ``after_ref``
+    lets the caller publish the replacement by linking rather than by writing
+    a third copy of it.
     """
     now = datetime.now(UTC)
     ts = now.strftime("%Y%m%dT%H%M%S")
     snapshots_base = contained_path(project_dir, ".ferumind/snapshots")
     _private_directory(snapshots_base)
     snapshot_dir = contained_path(snapshots_base, f"{ts}-{snapshot_id}")
+    store_root = blob_store_root(project_dir)
+    refs: dict[str, BlobRef] = {}
     with _snapshot_construction(snapshot_dir):
         for subdir, payload in (("before", before_bytes), ("after", after_bytes)):
             target = contained_path(snapshot_dir / subdir, content_path)
             _private_directory(target.parent)
-            atomic_write_bytes(target, payload)
+            refs[subdir] = _publish_payload(store_root, payload, target)
 
         if metadata_path is not None:
             for subdir, text in (
@@ -358,17 +404,40 @@ def create_binary_replacement_snapshot(
             metadata.model_dump_json(indent=2),
         )
 
-    return snapshot_dir
+    return BinaryReplacementSnapshot(
+        snapshot_dir=snapshot_dir,
+        before_ref=refs["before"],
+        after_ref=refs["after"],
+    )
 
 
-def _write_snapshot_file(snapshot_subdir: Path, target_path: str, content: str) -> None:
-    """Write a snapshot file preserving the relative path structure."""
+def _write_snapshot_file(
+    snapshot_subdir: Path,
+    target_path: str,
+    content: str,
+    *,
+    store_root: Path,
+) -> None:
+    """Publish one snapshot payload, preserving the relative path structure.
+
+    The encoded text goes into the content-addressed store and is linked into
+    place. A chain of edits to one document therefore stores each version
+    once: the ``before`` of edit N is byte-identical to the ``after`` of the
+    edit before it and lands on the blob that already holds it.
+    """
     if target_path:
         target = contained_path(snapshot_subdir, target_path)
         _private_directory(target.parent)
-        atomic_write_text(target, content)
+        _publish_payload(store_root, content.encode("utf-8"), target)
     else:
         _private_directory(snapshot_subdir)
+
+
+def _publish_payload(store_root: Path, payload: bytes, target: Path) -> BlobRef:
+    """Store *payload* once and link it to *target*."""
+    ref = store_bytes(store_root, payload)
+    link_into(store_root, ref, target)
+    return ref
 
 
 def _generate_diff(before: str | None, after: str | None, target_path: str | None) -> str:

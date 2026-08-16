@@ -215,7 +215,7 @@ workspace/
                      format marker
   projects/<key>/    spine.md, rules, canvases, memory, library, inbox, archive
   compacts/
-  .ferumind/         private database, snapshots, backups
+  .ferumind/         private database, snapshots, blobs, backups
 ```
 
 Run it as the OS account that owns the workspace, and never commit
