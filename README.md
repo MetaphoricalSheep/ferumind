@@ -221,6 +221,21 @@ workspace/
 Run it as the OS account that owns the workspace, and never commit
 `workspace/`.
 
+`.ferumind/` grows: every edit keeps a snapshot of what it replaced, every
+applied patch keeps its diff, and each `ferumind migrate` leaves a full backup
+tarball. That is deliberate — snapshots are the only copies of superseded
+versions — but it does not shrink on its own.
+
+```bash
+ferumind prune            # what could be reclaimed; deletes nothing
+ferumind prune --apply    # actually reclaim it
+```
+
+Prune only ever touches Ferumind's own bookkeeping under `.ferumind/`. Your
+documents are not part of it, `archive/` included — archiving is how you retire
+a document, not how you delete one. Stop the tunnel before `--apply`; the run
+rewrites the database and needs it to itself.
+
 ## Development
 
 ```bash

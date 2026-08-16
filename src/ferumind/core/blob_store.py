@@ -243,7 +243,7 @@ def sweep_unreferenced(store_root: Path) -> SweepResult:
     removed = 0
     kept = 0
     bytes_reclaimed = 0
-    for blob in _stored_blobs(store_root):
+    for blob in stored_blobs(store_root):
         try:
             status = os.stat(blob, follow_symlinks=False)
             if not stat.S_ISREG(status.st_mode):
@@ -259,12 +259,16 @@ def sweep_unreferenced(store_root: Path) -> SweepResult:
     return SweepResult(removed=removed, kept=kept, bytes_reclaimed=bytes_reclaimed)
 
 
-def _stored_blobs(store_root: Path) -> list[Path]:
+def stored_blobs(store_root: Path) -> list[Path]:
     """Return every validly named blob in *store_root*, and nothing else.
 
     Each candidate is re-resolved through :func:`blob_path`, so a name that
     is not a digest, a shard that does not match its contents, and a symlink
     at any component are all dropped here rather than acted on.
+
+    Public because "what counts as a blob" is this module's answer to give,
+    and retention needs it to say what a sweep *would* free without
+    performing the removal that would answer the question.
     """
     if not store_root.is_dir():
         return []

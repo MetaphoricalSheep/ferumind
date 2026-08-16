@@ -623,3 +623,138 @@ class TestInfoTakesWorkspace:
         assert result.returncode == 0, result.stderr
         assert not target.exists(), "info created the workspace it was asked about"
         assert "not initialized" in result.stdout
+
+
+class TestPrune:
+    """``prune`` reclaims Ferumind's own derived state, and defaults to saying so.
+
+    The command is pointed at a workspace that is the only copy of somebody's
+    knowledge, so the tests that matter most are the ones asserting it did
+    nothing: without ``--apply`` a run must leave the tree byte-identical.
+    """
+
+    def _aged_snapshot(self, workspace: WorkspaceRoot, project: str) -> Path:
+        """Put one long-expired snapshot in the project, registry row included."""
+        import sqlite3
+        from datetime import UTC, datetime, timedelta
+
+        from ferumind.core.paths import contained_project_root
+        from ferumind.core.snapshots import create_snapshot, new_snapshot_id
+
+        project_root = contained_project_root(workspace, project)
+        snapshot_id = new_snapshot_id()
+        directory = create_snapshot(
+            project_root,
+            project_key=project,
+            target_path="canvases/plan.md",
+            before_content="superseded text\n",
+            after_content=None,
+            reason="test_prune",
+            snapshot_id=snapshot_id,
+        )
+        stamp = (datetime.now(UTC) - timedelta(days=400)).strftime("%Y%m%dT%H%M%S")
+        aged = directory.with_name(f"{stamp}-{snapshot_id}")
+        directory.rename(aged)
+        conn = sqlite3.connect(Path(workspace) / ".ferumind" / "ferumind.sqlite")
+        try:
+            conn.execute(
+                "INSERT INTO snapshots (id, project_key, target_path, snapshot_dir, reason, "
+                "created_at) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    snapshot_id,
+                    project,
+                    "canvases/plan.md",
+                    str(aged),
+                    "test_prune",
+                    datetime.now(UTC).isoformat(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return aged
+
+    def test_the_default_run_deletes_nothing(self, workspace: WorkspaceRoot, project: str) -> None:
+        snapshot = self._aged_snapshot(workspace, project)
+
+        result = runner.invoke(
+            app,
+            [
+                "prune",
+                "--keep",
+                "snapshot-days=1",
+                "--keep",
+                "recent-snapshots=0",
+                "--workspace",
+                str(workspace),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "Nothing was deleted" in result.output
+        assert "snapshots (demo): 1 of 1" in result.output
+        assert snapshot.is_dir()
+
+    def test_apply_reclaims_and_says_what_it_took(
+        self, workspace: WorkspaceRoot, project: str
+    ) -> None:
+        snapshot = self._aged_snapshot(workspace, project)
+
+        result = runner.invoke(
+            app,
+            [
+                "prune",
+                "--apply",
+                "--keep",
+                "snapshot-days=1",
+                "--keep",
+                "recent-snapshots=0",
+                "--workspace",
+                str(workspace),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert "snapshots (demo): 1 of 1" in result.output
+        assert "after VACUUM" in result.output
+        assert not snapshot.exists()
+
+    def test_a_second_apply_finds_nothing_left(
+        self, workspace: WorkspaceRoot, project: str
+    ) -> None:
+        self._aged_snapshot(workspace, project)
+        arguments = [
+            "prune",
+            "--apply",
+            "--keep",
+            "snapshot-days=1",
+            "--keep",
+            "recent-snapshots=0",
+            "--workspace",
+            str(workspace),
+        ]
+        runner.invoke(app, arguments)
+
+        result = runner.invoke(app, arguments)
+
+        assert result.exit_code == 0, result.output
+        assert "Reclaimed 0 item(s)" in result.output
+
+    @pytest.mark.usefixtures("project")
+    def test_an_unknown_project_is_a_message_not_a_traceback(
+        self, workspace: WorkspaceRoot
+    ) -> None:
+        result = _cli("prune", "--project", "nope", "--workspace", str(workspace))
+
+        assert result.returncode == 1
+        assert "Cannot prune" in result.stderr
+        assert "Nothing was deleted" in result.stderr
+        assert "Traceback" not in result.stderr
+
+    @pytest.mark.usefixtures("project")
+    def test_an_out_of_range_override_is_refused(self, workspace: WorkspaceRoot) -> None:
+        result = _cli("prune", "--keep", "snapshot-days=0", "--workspace", str(workspace))
+
+        assert result.returncode == 1
+        assert "Cannot prune" in result.stderr
+        assert "Traceback" not in result.stderr

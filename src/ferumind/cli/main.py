@@ -27,6 +27,7 @@ if TYPE_CHECKING:  # imported for typing only; runtime imports stay function-loc
     from ferumind.core.images import ImagePolicy
     from ferumind.core.lint import LintReport
     from ferumind.core.paths import WorkspaceRoot
+    from ferumind.core.retention import PruneReport
 
 app = typer.Typer(
     help="Ferumind — local-first, Markdown-backed knowledge workspace.",
@@ -533,6 +534,102 @@ def compress_images(
     if total_failed:
         typer.echo(f"{total_failed} file(s) failed; see errors above.", err=True)
         raise typer.Exit(code=1)
+
+
+@app.command("prune")
+def prune(
+    project: Annotated[
+        str | None,
+        typer.Option("--project", help="Limit the run to one project's own derived state"),
+    ] = None,
+    apply: Annotated[
+        bool,
+        typer.Option("--apply", help="Actually delete; without it the run only reports"),
+    ] = False,
+    keep: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--keep",
+            help=(
+                "Override one retention bound as name=value; repeatable. Names: "
+                "snapshot-days, recent-snapshots, diff-days, proposal-days, "
+                "observation-days, migration-backups, runtime-log-bytes"
+            ),
+        ),
+    ] = None,
+    verbose: Annotated[
+        bool, typer.Option("--verbose", help="List every store, not just the ones that changed")
+    ] = False,
+    workspace: Annotated[Path | None, _WORKSPACE_OPTION] = None,
+) -> None:
+    """Reclaim Ferumind's own derived state: snapshots, diffs, logs, backups.
+
+    Reports and deletes nothing unless ``--apply`` is passed. User knowledge is
+    never touched — not ``archive/``, which holds documents the user chose to
+    retire, and not ``memory/``, ``canvases/``, ``inbox/``, ``rules/``,
+    ``compacts/``, ``library/``, or any ``spine.md``.
+
+    Stop the tunnel first (``just tunnel-stop``). A real run rewrites the
+    database with ``VACUUM``, which needs it to itself, and will fail rather
+    than race a live MCP server for it.
+    """
+    from ferumind.core.errors import FerumindError
+    from ferumind.core.paths import WorkspaceRoot
+    from ferumind.core.retention import RetentionPolicy, prune_workspace
+    from ferumind.db.database import Database
+
+    ws = WorkspaceRoot(_initialized_workspace_root(workspace))
+    try:
+        policy = RetentionPolicy.from_overrides(keep or [])
+    except ValueError as exc:
+        # Before the database is opened: a bad flag must not create or touch
+        # anything on its way to being rejected.
+        typer.echo(f"Cannot prune: {exc}", err=True)
+        raise typer.Exit(code=1) from exc
+
+    database = Database(_database_path(ws))
+    database.init_schema()
+    conn = database.get_connection()
+    try:
+        report = prune_workspace(conn, ws, policy=policy, project=project, dry_run=not apply)
+    except FerumindError as exc:
+        typer.echo(f"Cannot prune: {exc}", err=True)
+        typer.echo("Nothing was deleted.", err=True)
+        raise typer.Exit(code=1) from exc
+    finally:
+        conn.close()
+
+    _echo_prune_report(report, verbose=verbose)
+
+
+def _echo_prune_report(report: PruneReport, *, verbose: bool) -> None:
+    """Render the typed prune report without importing retention at startup."""
+    verb = "Would reclaim" if report.dry_run else "Reclaimed"
+    for entry in report.stores:
+        if not verbose and not entry.reclaimed:
+            continue
+        where = f"{entry.store} ({entry.scope})" if entry.scope else entry.store
+        typer.echo(
+            f"  {where}: {entry.reclaimed} of {entry.examined} "
+            f"({entry.bytes_reclaimed / 1048576:.1f} MB)"
+        )
+    typer.echo(
+        f"\n{verb} {report.total_reclaimed} item(s), "
+        f"{report.bytes_reclaimed / 1048576:.1f} MB from the filesystem "
+        f"across {len(report.projects)} project(s)."
+    )
+    if report.vacuumed:
+        typer.echo(
+            f"Database: {report.database_bytes_before / 1048576:.1f} MB -> "
+            f"{report.database_bytes_after / 1048576:.1f} MB after VACUUM."
+        )
+    elif report.dry_run:
+        typer.echo(
+            f"Database: {report.database_bytes_freed / 1048576:.1f} MB of payload would be "
+            "freed inside the file, returned by the VACUUM an --apply run performs."
+        )
+    if report.dry_run:
+        typer.echo("Nothing was deleted. Re-run with --apply to reclaim it.")
 
 
 @project_app.command("create")

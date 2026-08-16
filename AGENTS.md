@@ -171,6 +171,7 @@ skill"** whenever a bare "skill" could be read either way.
 | `uv run ferumind dashboard` | Run the loopback-only operator dashboard |
 | `uv run ferumind` | Run the CLI |
 | `uv run ferumind lint` | Report mechanical workspace findings; never edits Markdown |
+| `uv run ferumind prune` | Report reclaimable derived state; deletes only with `--apply` |
 | `just install-hooks` / `scripts/install-hooks.sh` | Install git hooks |
 
 `just --list` is the complete recipe inventory; the table above is the subset
@@ -408,6 +409,27 @@ commit, and not as part of `just verify`, the pre-commit hook, or CI. Default
 mode is read-only: report the summary back to the owner. `--fix` rebuilds
 derived index rows only and never writes Markdown; against the live workspace
 it needs the owner's say-so.
+
+## Storage retention
+
+`ferumind prune` is the only thing that reclaims Ferumind's own accumulated
+derived state — snapshot directories, applied-patch diffs, observation rows,
+migration tarballs, blobs, the private runtime log. Nothing else deletes any
+of it, and nothing runs it automatically: no scheduler, no startup hook, no
+MCP tool. An agent must not be able to reclaim the user's history.
+
+It reports and deletes nothing without `--apply`. Never pass `--apply` against
+the live workspace without the owner's say-so, and stop the tunnel first
+(`just tunnel-stop`) — a real run rewrites the database with `VACUUM`.
+
+User knowledge is out of bounds, `archive/` most of all: it holds documents
+the user chose to retire, not garbage. Same for `memory/`, `canvases/`,
+`inbox/`, `rules/`, `compacts/`, `library/`, and `spine.md`. The derived
+search index is `rebuild_index` and `verify-index --fix`'s to own, not
+prune's.
+
+The defaults in `core/retention.py` are local single-user ones. Hosted
+retention policy is NET-021's and is not settled by them.
 
 ## Lookup-first editing
 
