@@ -244,6 +244,7 @@ just verify    # format, lint, strict Pyright, tests, coverage floor
 
 See [CONTRIBUTING.md](CONTRIBUTING.md), [`AGENTS.md`](AGENTS.md),
 [docs/releases.md](docs/releases.md),
+[docs/dependencies.md](docs/dependencies.md),
 [docs/python-support.md](docs/python-support.md), and
 [docs/mcp-sdk-support.md](docs/mcp-sdk-support.md).
 

@@ -6,6 +6,12 @@ version: 2
 # May 2025 and is now ignored if present. Both produce a notification even when
 # the repository is not being watched for all activity, which a weekly
 # unattended run otherwise would not.
+#
+# Tier policy (REL-034): see docs/dependencies.md. Groups below cut the weekly
+# PR count; `.github/workflows/dependabot-auto-merge.yml` enables GitHub native
+# auto-merge only for the auto tiers. Majors and `mcp` stay ungrouped and
+# manual. Version-update cooldown is left at Dependabot's platform default
+# (3 days); do not set `cooldown.default-days: 0`.
 
 updates:
   - package-ecosystem: uv
@@ -16,6 +22,14 @@ updates:
     open-pull-requests-limit: 5
     assignees:
       - MetaphoricalSheep
+    groups:
+      uv-patches:
+        patterns:
+          - "*"
+        exclude-patterns:
+          - "mcp"
+        update-types:
+          - patch
 
   - package-ecosystem: npm
     directory: /.opencode
@@ -25,6 +39,12 @@ updates:
     open-pull-requests-limit: 5
     assignees:
       - MetaphoricalSheep
+    groups:
+      opencode-npm-patches:
+        patterns:
+          - "*"
+        update-types:
+          - patch
 
   - package-ecosystem: github-actions
     directory: /
@@ -34,3 +54,10 @@ updates:
     open-pull-requests-limit: 5
     assignees:
       - MetaphoricalSheep
+    groups:
+      github-actions-non-major:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
