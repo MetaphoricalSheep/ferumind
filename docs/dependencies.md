@@ -34,6 +34,14 @@ SHA pinning cannot address, and time is the cheapest defence. Do not set
 PR covers several bumps. Majors and `mcp` are excluded from groups so they
 arrive as individual, human-reviewed PRs.
 
+## Notifications
+
+There are none. No reviewers, no assignees, no code owners: the auto tiers
+merge on green without anyone reading the mail, and asking for a review on a PR
+that merges itself is just noise. Manual-tier PRs (majors, `mcp`) sit in the
+repository's pull request list until the owner goes looking, so check it when
+convenient rather than expecting a nudge.
+
 ## What a human still does
 
 For every **manual** PR:
