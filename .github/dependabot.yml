@@ -1,11 +1,10 @@
 version: 2
 
-# Review routing lives in two places on purpose. `assignees` puts the pull
-# request in the owner's "Assigned" queue; review requests come from
-# .github/CODEOWNERS, because Dependabot's own `reviewers:` key was removed in
-# May 2025 and is now ignored if present. Both produce a notification even when
-# the repository is not being watched for all activity, which a weekly
-# unattended run otherwise would not.
+# Nothing here routes a pull request to a person. The auto tiers merge
+# themselves once required checks pass, so a review request or an assignment
+# would only generate mail for something already handled. Manual-tier PRs
+# (majors, `mcp`) wait in the pull request list until the owner looks; that is
+# deliberate, not an oversight.
 #
 # Tier policy (REL-034): see docs/dependencies.md. Groups below cut the weekly
 # PR count; `.github/workflows/dependabot-auto-merge.yml` enables GitHub native
@@ -20,8 +19,6 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
-    assignees:
-      - MetaphoricalSheep
     groups:
       uv-patches:
         patterns:
@@ -37,8 +34,6 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
-    assignees:
-      - MetaphoricalSheep
     groups:
       opencode-npm-patches:
         patterns:
@@ -52,8 +47,6 @@ updates:
       interval: weekly
       day: monday
     open-pull-requests-limit: 5
-    assignees:
-      - MetaphoricalSheep
     groups:
       github-actions-non-major:
         patterns:
